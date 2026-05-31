@@ -237,6 +237,7 @@ APT 构建缓存会保留在 BuildKit cache 中，包括：
 
 因此 `apt-get update` 这条命令仍然会执行，但不会再每次从零下载完整索引和 `.deb` 包。首次成功构建后，后续重复构建会优先复用对应阶段缓存中导出的 APT 缓存。
 APT cache mount 会按 `CUDA_IMAGE_VERSION + UBUNTU_VERSION` 隔离；pip cache mount 会按 `PYTHON_VERSION + TORCH_VERSION + PYTORCH_CUDA_PROFILE` 隔离；conda 包缓存会按 `PYTHON_VERSION` 隔离。
+考虑到 `torch` / `torchvision` / `torchaudio` / `xformers` wheel 体积很大，当前构建还会额外把它们先下载到单独的 BuildKit wheel 缓存目录，再从本地 wheelhouse 安装。这样即使 pip 的普通 HTTP 缓存命中不稳定，后续同版本重建也能直接复用这些大文件，而不是重新完整下载。
 
 如果你所在环境对带宽比较敏感，推荐额外配置局域网代理或镜像：
 

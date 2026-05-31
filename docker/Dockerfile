@@ -98,6 +98,7 @@ RUN --mount=type=cache,id=${PIP_CACHE_KEY},target=/root/.cache/pip,sharing=locke
     && if [[ -n "${PIP_TRUSTED_HOST}" ]]; then python -m pip config set global.trusted-host "${PIP_TRUSTED_HOST}"; fi
 
 RUN --mount=type=cache,id=${PIP_CACHE_KEY},target=/root/.cache/pip,sharing=locked \
+    --mount=type=cache,id=${PIP_CACHE_KEY}-torch-wheels,target=/root/.cache/pytorch-wheels,sharing=locked \
     python -m pip install --upgrade pip setuptools wheel \
     && PYTORCH_PACKAGES=( \
         "torch==${TORCH_VERSION}" \
@@ -105,7 +106,14 @@ RUN --mount=type=cache,id=${PIP_CACHE_KEY},target=/root/.cache/pip,sharing=locke
         "torchaudio==${TORCHAUDIO_VERSION}" \
     ) \
     && if [[ -n "${XFORMERS_VERSION}" ]]; then PYTORCH_PACKAGES+=("xformers==${XFORMERS_VERSION}"); fi \
-    && python -m pip install "${PYTORCH_PACKAGES[@]}" --index-url "${PYTORCH_INDEX_URL}"
+    && python -m pip download \
+        --dest /root/.cache/pytorch-wheels \
+        --index-url "${PYTORCH_INDEX_URL}" \
+        "${PYTORCH_PACKAGES[@]}" \
+    && python -m pip install \
+        --no-index \
+        --find-links /root/.cache/pytorch-wheels \
+        "${PYTORCH_PACKAGES[@]}"
 
 RUN --mount=type=cache,id=${PIP_CACHE_KEY},target=/root/.cache/pip,sharing=locked \
     python -m pip install -r requirements.txt

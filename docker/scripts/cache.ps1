@@ -57,3 +57,92 @@ function Test-BuildKitLocalCache {
 
     return (Test-Path (Join-Path $Path 'index.json')) -and (Test-Path (Join-Path $Path 'blobs'))
 }
+
+function Remove-BuildKitCacheDirectory {
+    param(
+        [string]$Path,
+        [string]$Reason = '',
+        [string]$BaseDir = ''
+    )
+
+    if (-not (Test-Path $Path)) {
+        return
+    }
+
+    $displayPath = $Path
+    if ($BaseDir) {
+        $displayPath = [System.IO.Path]::GetRelativePath($BaseDir, $Path).Replace('\', '/')
+    }
+
+    $sizeText = Format-Bytes (Get-DirectorySizeBytes $Path)
+    if ($Reason) {
+        Write-Host "[CacheCleanup] remove docker/$displayPath size=$sizeText reason=$Reason"
+    } else {
+        Write-Host "[CacheCleanup] remove docker/$displayPath size=$sizeText"
+    }
+
+    Remove-Item -LiteralPath $Path -Recurse -Force
+}
+
+function Remove-StaleBuildKitNewDirs {
+    param(
+        [string]$ParentDir,
+        [string]$ExcludePath = '',
+        [string]$BaseDir = ''
+    )
+
+    if (-not (Test-Path $ParentDir)) {
+        return
+    }
+
+    $excludedFullPath = ''
+    if ($ExcludePath) {
+        $excludedFullPath = [System.IO.Path]::GetFullPath($ExcludePath)
+    }
+
+    $staleDirs = Get-ChildItem -LiteralPath $ParentDir -Directory -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -like '*-new' -and (
+            -not $excludedFullPath -or
+            [System.IO.Path]::GetFullPath($_.FullName) -cne $excludedFullPath
+        )
+    }
+
+    foreach ($staleDir in $staleDirs) {
+        Remove-BuildKitCacheDirectory -Path $staleDir.FullName -Reason 'stale-new' -BaseDir $BaseDir
+    }
+}
+
+function Remove-BuildKitSiblingCaches {
+    param(
+        [string]$ParentDir,
+        [string]$CurrentDir,
+        [string[]]$Patterns,
+        [string]$BaseDir = ''
+    )
+
+    if (-not (Test-Path $ParentDir)) {
+        return
+    }
+
+    $currentFullPath = [System.IO.Path]::GetFullPath($CurrentDir)
+    $siblingDirs = Get-ChildItem -LiteralPath $ParentDir -Directory -ErrorAction SilentlyContinue | Where-Object {
+        [System.IO.Path]::GetFullPath($_.FullName) -cne $currentFullPath -and
+        $_.Name -notlike '*-new'
+    }
+
+    foreach ($siblingDir in $siblingDirs) {
+        $matchesPattern = $false
+        foreach ($pattern in $Patterns) {
+            if ($siblingDir.Name -like $pattern) {
+                $matchesPattern = $true
+                break
+            }
+        }
+
+        if (-not $matchesPattern) {
+            continue
+        }
+
+        Remove-BuildKitCacheDirectory -Path $siblingDir.FullName -Reason 'superseded-family-cache' -BaseDir $BaseDir
+    }
+}

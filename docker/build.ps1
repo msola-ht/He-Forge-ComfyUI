@@ -217,6 +217,8 @@ $legacyBootstrapCacheNewDir = Join-Path $dockerDir '.buildx-cache-bootstrap-new'
 $legacyFinalCacheDir = Join-Path $dockerDir '.buildx-cache-final'
 $legacyFinalCacheNewDir = Join-Path $dockerDir '.buildx-cache-final-new'
 $cacheRootDir = Join-Path $dockerDir '.buildx-cache-v2'
+$bootstrapCacheParentDir = Join-Path $cacheRootDir 'bootstrap'
+$finalCacheParentDir = Join-Path $cacheRootDir 'final'
 $bootstrapCacheDir = Join-Path $cacheRootDir "bootstrap/$cacheKeySuffix"
 $bootstrapCacheNewDir = Join-Path $cacheRootDir "bootstrap/$cacheKeySuffix-new"
 $finalCacheKeySuffix = "$cacheKeySuffix-plugins$customNodesHash"
@@ -228,6 +230,9 @@ $cacheNewDir = if ($BuildStage -eq 'bootstrap') { $bootstrapCacheNewDir } else {
 if (Test-Path $cacheNewDir) {
     Remove-Item $cacheNewDir -Recurse -Force
 }
+
+Remove-StaleBuildKitNewDirs -ParentDir $bootstrapCacheParentDir -ExcludePath $bootstrapCacheNewDir -BaseDir $dockerDir
+Remove-StaleBuildKitNewDirs -ParentDir $finalCacheParentDir -ExcludePath $finalCacheNewDir -BaseDir $dockerDir
 
 $arguments = @(
     'buildx', 'build',
@@ -273,7 +278,6 @@ if ($BuildStage -eq 'final' -and -not (Test-Path $cacheDir) -and (Test-BuildKitL
     $cacheFromDirs += $legacyFinalCacheDir
 }
 if ($BuildStage -eq 'final') {
-    $finalCacheParentDir = Join-Path $cacheRootDir 'final'
     if (Test-Path $finalCacheParentDir) {
         $relatedFinalCaches = Get-ChildItem -LiteralPath $finalCacheParentDir -Directory | Where-Object {
             $_.Name -like "$cacheKeySuffix*" -and
@@ -356,6 +360,16 @@ try {
 
     if (Test-Path $cacheNewDir) {
         Rename-Item -LiteralPath $cacheNewDir -NewName (Split-Path -Leaf $cacheDir)
+    }
+
+    Remove-StaleBuildKitNewDirs -ParentDir $bootstrapCacheParentDir -ExcludePath $bootstrapCacheNewDir -BaseDir $dockerDir
+    Remove-StaleBuildKitNewDirs -ParentDir $finalCacheParentDir -ExcludePath $finalCacheNewDir -BaseDir $dockerDir
+    if ($BuildStage -eq 'final') {
+        Remove-BuildKitSiblingCaches `
+            -ParentDir $finalCacheParentDir `
+            -CurrentDir $finalCacheDir `
+            -Patterns @($cacheKeySuffix, "$cacheKeySuffix-plugins*") `
+            -BaseDir $dockerDir
     }
 
     Show-CacheState -Label 'AfterBuild' -CacheDir $cacheDir -CacheNewDir $cacheNewDir -BaseDir $dockerDir
