@@ -1,0 +1,4 @@
+docker/.env
+docker/.buildx-cache/
+docker/.buildx-cache-new/
+storage/

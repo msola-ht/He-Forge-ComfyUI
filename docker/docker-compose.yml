@@ -1,0 +1,70 @@
+services:
+  comfyui-runtime:
+    image: ${IMAGE_NAME:-hegenai/comfyui}:${CUDA_PROFILE:-cu128}-runtime
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BUILDER_CUDA_IMAGE: nvidia/cuda:${CUDA_VERSION:-12.8.2}-devel-${UBUNTU_VERSION:-ubuntu22.04}
+        FINAL_CUDA_IMAGE: nvidia/cuda:${CUDA_VERSION:-12.8.2}-runtime-${UBUNTU_VERSION:-ubuntu22.04}
+        MINIFORGE_INSTALLER_URL: ${MINIFORGE_INSTALLER_URL:-https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh}
+        PYTHON_VERSION: ${PYTHON_VERSION:-3.12}
+        COMFYUI_REPO: ${COMFYUI_REPO:-https://github.com/Comfy-Org/ComfyUI.git}
+        COMFYUI_REF: ${COMFYUI_REF:-master}
+        NODEJS_VERSION: ${NODEJS_VERSION:-22}
+        TORCH_VERSION: ${TORCH_VERSION:-2.7.0}
+        PYTORCH_INDEX_URL: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}
+    ports:
+      - "${RUNTIME_PORT:-8188}:8188"
+    user: root
+    environment:
+      COMFYUI_PORT: "8188"
+      COMFYUI_HOME: ${COMFYUI_HOME:-/root/ComfyUI}
+      PIP_CACHE_DIR: ${PIP_CACHE_DIR:-/root/.cache/pip}
+      CONDA_PKGS_DIRS: ${CONDA_PKGS_DIRS:-/root/miniforge/pkgs}
+      NPM_CONFIG_CACHE: ${NPM_CONFIG_CACHE:-/root/.npm}
+      UV_CACHE_DIR: ${UV_CACHE_DIR:-/root/.cache/uv}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      - ${RUNTIME_COMFYUI_DIR:-../storage/runtime/ComfyUI}:${COMFYUI_HOME:-/root/ComfyUI}
+      - ${RUNTIME_PIP_CACHE_DIR:-../storage/runtime/cache/pip}:${PIP_CACHE_DIR:-/root/.cache/pip}
+      - ${RUNTIME_CONDA_CACHE_DIR:-../storage/runtime/cache/conda-pkgs}:${CONDA_PKGS_DIRS:-/root/miniforge/pkgs}
+      - ${RUNTIME_NPM_CACHE_DIR:-../storage/runtime/cache/npm}:${NPM_CONFIG_CACHE:-/root/.npm}
+      - ${RUNTIME_UV_CACHE_DIR:-../storage/runtime/cache/uv}:${UV_CACHE_DIR:-/root/.cache/uv}
+    gpus: all
+
+  comfyui-devel:
+    image: ${IMAGE_NAME:-hegenai/comfyui}:${CUDA_PROFILE:-cu128}-devel
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        BUILDER_CUDA_IMAGE: nvidia/cuda:${CUDA_VERSION:-12.8.2}-devel-${UBUNTU_VERSION:-ubuntu22.04}
+        FINAL_CUDA_IMAGE: nvidia/cuda:${CUDA_VERSION:-12.8.2}-devel-${UBUNTU_VERSION:-ubuntu22.04}
+        MINIFORGE_INSTALLER_URL: ${MINIFORGE_INSTALLER_URL:-https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh}
+        PYTHON_VERSION: ${PYTHON_VERSION:-3.12}
+        COMFYUI_REPO: ${COMFYUI_REPO:-https://github.com/Comfy-Org/ComfyUI.git}
+        COMFYUI_REF: ${COMFYUI_REF:-master}
+        NODEJS_VERSION: ${NODEJS_VERSION:-22}
+        TORCH_VERSION: ${TORCH_VERSION:-2.7.0}
+        PYTORCH_INDEX_URL: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}
+    ports:
+      - "${DEVEL_PORT:-8190}:8188"
+    user: root
+    environment:
+      COMFYUI_PORT: "8188"
+      COMFYUI_HOME: ${COMFYUI_HOME:-/root/ComfyUI}
+      PIP_CACHE_DIR: ${PIP_CACHE_DIR:-/root/.cache/pip}
+      CONDA_PKGS_DIRS: ${CONDA_PKGS_DIRS:-/root/miniforge/pkgs}
+      NPM_CONFIG_CACHE: ${NPM_CONFIG_CACHE:-/root/.npm}
+      UV_CACHE_DIR: ${UV_CACHE_DIR:-/root/.cache/uv}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      - ${DEVEL_COMFYUI_DIR:-../storage/devel/ComfyUI}:${COMFYUI_HOME:-/root/ComfyUI}
+      - ${DEVEL_PIP_CACHE_DIR:-../storage/devel/cache/pip}:${PIP_CACHE_DIR:-/root/.cache/pip}
+      - ${DEVEL_CONDA_CACHE_DIR:-../storage/devel/cache/conda-pkgs}:${CONDA_PKGS_DIRS:-/root/miniforge/pkgs}
+      - ${DEVEL_NPM_CACHE_DIR:-../storage/devel/cache/npm}:${NPM_CONFIG_CACHE:-/root/.npm}
+      - ${DEVEL_UV_CACHE_DIR:-../storage/devel/cache/uv}:${UV_CACHE_DIR:-/root/.cache/uv}
+    gpus: all
