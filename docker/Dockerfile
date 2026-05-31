@@ -4,7 +4,7 @@ ARG BUILDER_CUDA_IMAGE=nvidia/cuda:12.8.2-devel-ubuntu22.04
 ARG FINAL_CUDA_IMAGE=nvidia/cuda:12.8.2-runtime-ubuntu22.04
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:latest
 
-FROM ${BUILDER_CUDA_IMAGE} AS builder
+FROM ${BUILDER_CUDA_IMAGE} AS builder-bootstrap
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -13,9 +13,10 @@ ARG MINIFORGE_INSTALLER_URL=https://github.com/conda-forge/miniforge/releases/la
 ARG PYTHON_VERSION=3.12
 ARG COMFYUI_REPO=https://github.com/Comfy-Org/ComfyUI.git
 ARG COMFYUI_REF=master
+ARG CUDA_PROFILE=cu128
+ARG UBUNTU_VERSION=22
 ARG NODEJS_VERSION=22
 ARG TORCH_VERSION=2.7.0
-ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu128
 
 ENV CONDA_DIR=/root/miniforge \
     CONDA_ENV_NAME=comfyui \
@@ -23,8 +24,8 @@ ENV CONDA_DIR=/root/miniforge \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONUNBUFFERED=1
 
-RUN --mount=type=cache,id=apt-cache-ubuntu2204,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,id=apt-lists-ubuntu2204,target=/var/lib/apt/lists,sharing=locked \
+RUN --mount=type=cache,id=apt-cache-ubuntu${UBUNTU_VERSION}04,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=apt-lists-ubuntu${UBUNTU_VERSION}04,target=/var/lib/apt/lists,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean \
     && printf 'Binary::apt::APT::Keep-Downloaded-Packages "true";\n' > /etc/apt/apt.conf.d/keep-cache \
     && apt-get update \
@@ -63,8 +64,16 @@ RUN git init . \
     && git fetch --depth 1 origin "${COMFYUI_REF}" \
     && git checkout --detach FETCH_HEAD
 
+
+FROM builder-bootstrap AS builder
+
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
-    case "${TORCH_VERSION}" in \
+    case "${CUDA_PROFILE}" in \
+        cu128) export PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu128 ;; \
+        cu126) export PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu126 ;; \
+        *) echo "Unsupported CUDA_PROFILE: ${CUDA_PROFILE}" >&2; exit 1 ;; \
+    esac \
+    && case "${TORCH_VERSION}" in \
         2.7.1) export TORCHVISION_VERSION=0.22.1 TORCHAUDIO_VERSION=2.7.1 ;; \
         2.7.0) export TORCHVISION_VERSION=0.22.0 TORCHAUDIO_VERSION=2.7.0 ;; \
         2.6.0) export TORCHVISION_VERSION=0.21.0 TORCHAUDIO_VERSION=2.6.0 ;; \
@@ -82,11 +91,12 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
 FROM ${UV_IMAGE} AS uv-binary
 
 
-FROM ${FINAL_CUDA_IMAGE} AS final
+FROM ${FINAL_CUDA_IMAGE} AS bootstrap
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG DEBIAN_FRONTEND=noninteractive
+ARG UBUNTU_VERSION=22
 ARG NODEJS_VERSION=22
 
 ENV CONDA_DIR=/root/miniforge \
@@ -98,8 +108,8 @@ ENV CONDA_DIR=/root/miniforge \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
-RUN --mount=type=cache,id=apt-cache-ubuntu2204,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,id=apt-lists-ubuntu2204,target=/var/lib/apt/lists,sharing=locked \
+RUN --mount=type=cache,id=apt-cache-ubuntu${UBUNTU_VERSION}04,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=apt-lists-ubuntu${UBUNTU_VERSION}04,target=/var/lib/apt/lists,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean \
     && printf 'Binary::apt::APT::Keep-Downloaded-Packages "true";\n' > /etc/apt/apt.conf.d/keep-cache \
     && apt-get update \
@@ -117,8 +127,8 @@ RUN --mount=type=cache,id=apt-cache-ubuntu2204,target=/var/cache/apt,sharing=loc
         tini \
         unzip
 
-COPY --from=builder /root/miniforge /root/miniforge
-COPY --from=builder /root/ComfyUI-src /root/ComfyUI-seed
+COPY --from=builder-bootstrap /root/miniforge /root/miniforge
+COPY --from=builder-bootstrap /root/ComfyUI-src /root/ComfyUI-seed
 COPY --from=uv-binary /uv /usr/local/bin/uv
 COPY --from=uv-binary /uvx /usr/local/bin/uvx
 COPY --chmod=755 docker/scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
@@ -129,7 +139,9 @@ RUN case "${NODEJS_VERSION}" in 22|24) ;; *) echo "Unsupported NODEJS_VERSION: $
     && eval "$(fnm env --shell bash)" \
     && fnm install "${NODEJS_VERSION}" \
     && fnm default "${NODEJS_VERSION}" \
-    && NODE_BIN_DIR="$(dirname "$(fnm which "${NODEJS_VERSION}")")" \
+    && NODE_BIN="$(find "${FNM_DIR}/node-versions" -path "*/installation/bin/node" -type f -print -quit)" \
+    && test -n "${NODE_BIN}" \
+    && NODE_BIN_DIR="$(dirname "${NODE_BIN}")" \
     && ln -sf "${NODE_BIN_DIR}/node" /usr/local/bin/node \
     && ln -sf "${NODE_BIN_DIR}/npm" /usr/local/bin/npm \
     && ln -sf "${NODE_BIN_DIR}/npx" /usr/local/bin/npx \
@@ -148,3 +160,9 @@ VOLUME ["/root/ComfyUI"]
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 CMD ["python", "main.py", "--listen", "0.0.0.0", "--port", "8188"]
+
+
+FROM bootstrap AS final
+
+COPY --from=builder /root/miniforge /root/miniforge
+COPY --from=builder /root/ComfyUI-src /root/ComfyUI-seed

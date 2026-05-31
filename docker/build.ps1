@@ -2,12 +2,16 @@ param(
     [ValidateSet('runtime', 'devel')]
     [string]$Variant = 'runtime',
 
+    [ValidateSet('bootstrap', 'final', '')]
+    [string]$BuildStage = '',
+
     [string]$ImageName = 'hegenai/comfyui',
 
     [ValidateSet('cu128', 'cu126')]
     [string]$CudaProfile = 'cu128',
 
-    [string]$UbuntuVersion = 'ubuntu22.04',
+    [ValidateSet('22', '24')]
+    [string]$UbuntuVersion = '22',
 
     [string]$MiniforgeInstallerUrl = 'https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh',
 
@@ -22,6 +26,8 @@ param(
 
     [string]$TorchVersion = '2.7.0',
 
+    [switch]$FromEnv,
+
     [switch]$Push,
 
     [switch]$NoCache
@@ -29,99 +35,101 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-function Get-DirectorySizeBytes {
-    param(
-        [string]$Path
-    )
-
-    if (-not (Test-Path $Path)) {
-        return 0
-    }
-
-    $items = Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue
-    if (-not $items) {
-        return 0
-    }
-
-    return ($items | Measure-Object -Property Length -Sum).Sum
-}
-
-function Format-Bytes {
-    param(
-        [double]$Bytes
-    )
-
-    if ($Bytes -ge 1GB) { return '{0:N2} GB' -f ($Bytes / 1GB) }
-    if ($Bytes -ge 1MB) { return '{0:N2} MB' -f ($Bytes / 1MB) }
-    if ($Bytes -ge 1KB) { return '{0:N2} KB' -f ($Bytes / 1KB) }
-    return '{0:N0} B' -f $Bytes
-}
-
-function Show-CacheState {
-    param(
-        [string]$Label,
-        [string]$CacheDir,
-        [string]$CacheNewDir
-    )
-
-    $cacheExists = Test-Path $CacheDir
-    $cacheNewExists = Test-Path $CacheNewDir
-    $cacheSize = Format-Bytes (Get-DirectorySizeBytes $CacheDir)
-    $cacheNewSize = Format-Bytes (Get-DirectorySizeBytes $CacheNewDir)
-
-    Write-Host "[$Label] docker/.buildx-cache exists=$cacheExists size=$cacheSize"
-    Write-Host "[$Label] docker/.buildx-cache-new exists=$cacheNewExists size=$cacheNewSize"
-}
-
 $dockerDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root = Split-Path -Parent $dockerDir
-$cacheDir = Join-Path $dockerDir '.buildx-cache'
-$cacheNewDir = Join-Path $dockerDir '.buildx-cache-new'
+$scriptDir = Join-Path $dockerDir 'scripts'
+$envFile = Join-Path $dockerDir '.env'
+$envExampleFile = Join-Path $dockerDir '.env.example'
 
-$cudaProfileMap = @{
-    'cu128' = @{
-        CudaVersion = '12.8.2'
-        PyTorchIndexUrl = 'https://download.pytorch.org/whl/cu128'
-    }
-    'cu126' = @{
-        CudaVersion = '12.6.3'
-        PyTorchIndexUrl = 'https://download.pytorch.org/whl/cu126'
+. (Join-Path $scriptDir 'env.ps1')
+. (Join-Path $scriptDir 'versions.ps1')
+. (Join-Path $scriptDir 'prompt.ps1')
+. (Join-Path $scriptDir 'cache.ps1')
+
+Ensure-EnvFile -EnvFile $envFile -EnvExampleFile $envExampleFile
+
+$defaults = @{
+    ImageName = $ImageName
+    CudaProfile = $CudaProfile
+    UbuntuVersion = $UbuntuVersion
+    MiniforgeInstallerUrl = $MiniforgeInstallerUrl
+    PythonVersion = $PythonVersion
+    ComfyUIRepo = $ComfyUIRepo
+    ComfyUIRef = $ComfyUIRef
+    NodeJsVersion = $NodeJsVersion
+    TorchVersion = $TorchVersion
+}
+
+$versionConfig = Get-VersionConfig -Values (Read-EnvFile -Path $envFile) -Defaults $defaults
+$versionConfig = Merge-BoundVersionConfig -Config $versionConfig -BoundParameters $PSBoundParameters
+
+$ImageName = $versionConfig.ImageName
+$CudaProfile = $versionConfig.CudaProfile
+$UbuntuVersion = $versionConfig.UbuntuVersion
+$MiniforgeInstallerUrl = $versionConfig.MiniforgeInstallerUrl
+$PythonVersion = $versionConfig.PythonVersion
+$ComfyUIRepo = $versionConfig.ComfyUIRepo
+$ComfyUIRef = $versionConfig.ComfyUIRef
+$NodeJsVersion = $versionConfig.NodeJsVersion
+$TorchVersion = $versionConfig.TorchVersion
+
+if (-not $FromEnv) {
+    Show-VersionConfig -Config $versionConfig
+    $shouldConfigure = Select-YesNo -Label 'Modify version configuration before build?' -DefaultValue $false
+
+    if ($shouldConfigure) {
+        $versionConfig = Edit-VersionConfig -Config $versionConfig
+
+        Save-VersionConfig `
+            -Path $envFile `
+            -ImageName $versionConfig.ImageName `
+            -CudaProfile $versionConfig.CudaProfile `
+            -UbuntuVersion $versionConfig.UbuntuVersion `
+            -MiniforgeInstallerUrl $versionConfig.MiniforgeInstallerUrl `
+            -PythonVersion $versionConfig.PythonVersion `
+            -ComfyUIRepo $versionConfig.ComfyUIRepo `
+            -ComfyUIRef $versionConfig.ComfyUIRef `
+            -NodeJsVersion $versionConfig.NodeJsVersion `
+            -TorchVersion $versionConfig.TorchVersion
+
+        Write-Host ""
+        Write-Host "Saved version configuration to docker/.env"
+
+        $ImageName = $versionConfig.ImageName
+        $CudaProfile = $versionConfig.CudaProfile
+        $UbuntuVersion = $versionConfig.UbuntuVersion
+        $MiniforgeInstallerUrl = $versionConfig.MiniforgeInstallerUrl
+        $PythonVersion = $versionConfig.PythonVersion
+        $ComfyUIRepo = $versionConfig.ComfyUIRepo
+        $ComfyUIRef = $versionConfig.ComfyUIRef
+        $NodeJsVersion = $versionConfig.NodeJsVersion
+        $TorchVersion = $versionConfig.TorchVersion
     }
 }
 
-$torchVersionMap = @{
-    '2.7.1' = @{
-        TorchVisionVersion = '0.22.1'
-        TorchAudioVersion = '2.7.1'
-    }
-    '2.7.0' = @{
-        TorchVisionVersion = '0.22.0'
-        TorchAudioVersion = '2.7.0'
-    }
-    '2.6.0' = @{
-        TorchVisionVersion = '0.21.0'
-        TorchAudioVersion = '2.6.0'
-    }
+if (-not $BuildStage) {
+    $BuildStage = Select-BuildStage -CurrentValue 'final'
 }
 
-if (-not $cudaProfileMap.ContainsKey($CudaProfile)) {
-    $supportedCudaProfiles = ($cudaProfileMap.Keys | Sort-Object) -join ', '
-    throw "不支持的 CudaProfile：$CudaProfile。当前支持：$supportedCudaProfiles"
-}
+Assert-UbuntuVersion -UbuntuVersion $UbuntuVersion
+Assert-NodeJsVersion -NodeJsVersion $NodeJsVersion
+Assert-TorchVersion -TorchVersion $TorchVersion
 
-if (-not $torchVersionMap.ContainsKey($TorchVersion)) {
-    $supportedTorchVersions = ($torchVersionMap.Keys | Sort-Object -Descending) -join ', '
-    throw "不支持的 TorchVersion：$TorchVersion。当前支持：$supportedTorchVersions"
-}
-
-$cudaVersion = $cudaProfileMap[$CudaProfile].CudaVersion
-$pyTorchIndexUrl = $cudaProfileMap[$CudaProfile].PyTorchIndexUrl
-$builderCudaImage = "nvidia/cuda:$cudaVersion-devel-$UbuntuVersion"
-$finalCudaImage = "nvidia/cuda:$cudaVersion-$Variant-$UbuntuVersion"
+$cudaImageSet = Resolve-CudaImageSet -CudaProfile $CudaProfile -UbuntuVersion $UbuntuVersion -Variant $Variant
+$builderCudaImage = $cudaImageSet.BuilderCudaImage
+$finalCudaImage = $cudaImageSet.FinalCudaImage
 $uvImage = 'ghcr.io/astral-sh/uv:latest'
-$tag = "${ImageName}:${CudaProfile}-${Variant}"
-$torchVisionVersion = $torchVersionMap[$TorchVersion].TorchVisionVersion
-$torchAudioVersion = $torchVersionMap[$TorchVersion].TorchAudioVersion
+$tagSuffix = if ($BuildStage -eq 'bootstrap') { "$CudaProfile-$Variant-bootstrap" } else { "$CudaProfile-$Variant" }
+$tag = "${ImageName}:${tagSuffix}"
+
+$legacyCacheDir = Join-Path $dockerDir '.buildx-cache'
+$legacyCacheNewDir = Join-Path $dockerDir '.buildx-cache-new'
+$bootstrapCacheDir = Join-Path $dockerDir '.buildx-cache-bootstrap'
+$bootstrapCacheNewDir = Join-Path $dockerDir '.buildx-cache-bootstrap-new'
+$finalCacheDir = Join-Path $dockerDir '.buildx-cache-final'
+$finalCacheNewDir = Join-Path $dockerDir '.buildx-cache-final-new'
+$cacheDir = if ($BuildStage -eq 'bootstrap') { $bootstrapCacheDir } else { $finalCacheDir }
+$cacheNewDir = if ($BuildStage -eq 'bootstrap') { $bootstrapCacheNewDir } else { $finalCacheNewDir }
 
 if (Test-Path $cacheNewDir) {
     Remove-Item $cacheNewDir -Recurse -Force
@@ -130,6 +138,7 @@ if (Test-Path $cacheNewDir) {
 $arguments = @(
     'buildx', 'build',
     '--file', 'docker/Dockerfile',
+    '--target', $BuildStage,
     '--tag', $tag,
     '--build-arg', "BUILDER_CUDA_IMAGE=$builderCudaImage",
     '--build-arg', "FINAL_CUDA_IMAGE=$finalCudaImage",
@@ -137,14 +146,26 @@ $arguments = @(
     '--build-arg', "PYTHON_VERSION=$PythonVersion",
     '--build-arg', "COMFYUI_REPO=$ComfyUIRepo",
     '--build-arg', "COMFYUI_REF=$ComfyUIRef",
+    '--build-arg', "CUDA_PROFILE=$CudaProfile",
+    '--build-arg', "UBUNTU_VERSION=$UbuntuVersion",
     '--build-arg', "NODEJS_VERSION=$NodeJsVersion",
     '--build-arg', "TORCH_VERSION=$TorchVersion",
-    '--build-arg', "PYTORCH_INDEX_URL=$pyTorchIndexUrl",
     '--cache-to', "type=local,dest=$cacheNewDir,mode=max"
 )
 
+$cacheFromDirs = @()
+if (-not (Test-Path $bootstrapCacheDir) -and -not (Test-Path $finalCacheDir) -and (Test-Path $legacyCacheDir)) {
+    $cacheFromDirs += $legacyCacheDir
+}
+if ($BuildStage -eq 'final' -and (Test-Path $bootstrapCacheDir)) {
+    $cacheFromDirs += $bootstrapCacheDir
+}
 if (Test-Path $cacheDir) {
-    $arguments += @('--cache-from', "type=local,src=$cacheDir")
+    $cacheFromDirs += $cacheDir
+}
+
+foreach ($cacheFromDir in ($cacheFromDirs | Select-Object -Unique)) {
+    $arguments += @('--cache-from', "type=local,src=$cacheFromDir")
 }
 
 if ($Push) {
@@ -163,18 +184,22 @@ Push-Location $root
 
 try {
     Show-CacheState -Label 'BeforeBuild' -CacheDir $cacheDir -CacheNewDir $cacheNewDir
+    Show-CacheState -Label 'LegacyCache' -CacheDir $legacyCacheDir -CacheNewDir $legacyCacheNewDir
+    if ($BuildStage -eq 'final') {
+        Show-CacheState -Label 'BootstrapCache' -CacheDir $bootstrapCacheDir -CacheNewDir $bootstrapCacheNewDir
+    }
 
     $pullImages = @($builderCudaImage, $finalCudaImage, $uvImage) | Select-Object -Unique
     foreach ($image in $pullImages) {
         & docker pull $image
         if ($LASTEXITCODE -ne 0) {
-            throw "docker pull 执行失败：$image，退出码：$LASTEXITCODE"
+            throw "docker pull failed: $image, exit code: $LASTEXITCODE"
         }
     }
 
     & docker @arguments
     if ($LASTEXITCODE -ne 0) {
-        throw "docker buildx build 执行失败，退出码：$LASTEXITCODE"
+        throw "docker buildx build failed, exit code: $LASTEXITCODE"
     }
 
     if (Test-Path $cacheDir) {
@@ -182,16 +207,21 @@ try {
     }
 
     if (Test-Path $cacheNewDir) {
-        Rename-Item $cacheNewDir '.buildx-cache'
+        Rename-Item -LiteralPath $cacheNewDir -NewName (Split-Path -Leaf $cacheDir)
     }
 
     Show-CacheState -Label 'AfterBuild' -CacheDir $cacheDir -CacheNewDir $cacheNewDir
+    Show-CacheState -Label 'LegacyCache' -CacheDir $legacyCacheDir -CacheNewDir $legacyCacheNewDir
+    if ($BuildStage -eq 'final') {
+        Show-CacheState -Label 'BootstrapCache' -CacheDir $bootstrapCacheDir -CacheNewDir $bootstrapCacheNewDir
+    }
 }
 finally {
     if ($LASTEXITCODE -ne 0) {
         Show-CacheState -Label 'OnFailure' -CacheDir $cacheDir -CacheNewDir $cacheNewDir
         if (Test-Path $cacheNewDir) {
-            Write-Host "[OnFailure] 检测到未轮换的 docker/.buildx-cache-new，可用于观察这次失败前导出的缓存内容。"
+            $cacheNewName = Split-Path -Leaf $cacheNewDir
+            Write-Host "[OnFailure] docker/$cacheNewName exists and was not rotated. Inspect it for cache exported before failure."
         }
     }
     Pop-Location

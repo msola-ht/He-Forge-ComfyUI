@@ -5,15 +5,16 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
       args:
-        BUILDER_CUDA_IMAGE: nvidia/cuda:${CUDA_VERSION:-12.8.2}-devel-${UBUNTU_VERSION:-ubuntu22.04}
-        FINAL_CUDA_IMAGE: nvidia/cuda:${CUDA_VERSION:-12.8.2}-runtime-${UBUNTU_VERSION:-ubuntu22.04}
+        BUILDER_CUDA_IMAGE: ${BUILDER_CUDA_IMAGE:-nvidia/cuda:12.8.2-devel-ubuntu22.04}
+        FINAL_CUDA_IMAGE: ${RUNTIME_CUDA_IMAGE:-nvidia/cuda:12.8.2-runtime-ubuntu22.04}
         MINIFORGE_INSTALLER_URL: ${MINIFORGE_INSTALLER_URL:-https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh}
         PYTHON_VERSION: ${PYTHON_VERSION:-3.12}
         COMFYUI_REPO: ${COMFYUI_REPO:-https://github.com/Comfy-Org/ComfyUI.git}
         COMFYUI_REF: ${COMFYUI_REF:-master}
+        CUDA_PROFILE: ${CUDA_PROFILE:-cu128}
+        UBUNTU_VERSION: ${UBUNTU_VERSION:-22}
         NODEJS_VERSION: ${NODEJS_VERSION:-22}
         TORCH_VERSION: ${TORCH_VERSION:-2.7.0}
-        PYTORCH_INDEX_URL: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}
     ports:
       - "${RUNTIME_PORT:-8188}:8188"
     user: root
@@ -40,15 +41,16 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
       args:
-        BUILDER_CUDA_IMAGE: nvidia/cuda:${CUDA_VERSION:-12.8.2}-devel-${UBUNTU_VERSION:-ubuntu22.04}
-        FINAL_CUDA_IMAGE: nvidia/cuda:${CUDA_VERSION:-12.8.2}-devel-${UBUNTU_VERSION:-ubuntu22.04}
+        BUILDER_CUDA_IMAGE: ${BUILDER_CUDA_IMAGE:-nvidia/cuda:12.8.2-devel-ubuntu22.04}
+        FINAL_CUDA_IMAGE: ${DEVEL_CUDA_IMAGE:-nvidia/cuda:12.8.2-devel-ubuntu22.04}
         MINIFORGE_INSTALLER_URL: ${MINIFORGE_INSTALLER_URL:-https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh}
         PYTHON_VERSION: ${PYTHON_VERSION:-3.12}
         COMFYUI_REPO: ${COMFYUI_REPO:-https://github.com/Comfy-Org/ComfyUI.git}
         COMFYUI_REF: ${COMFYUI_REF:-master}
+        CUDA_PROFILE: ${CUDA_PROFILE:-cu128}
+        UBUNTU_VERSION: ${UBUNTU_VERSION:-22}
         NODEJS_VERSION: ${NODEJS_VERSION:-22}
         TORCH_VERSION: ${TORCH_VERSION:-2.7.0}
-        PYTORCH_INDEX_URL: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}
     ports:
       - "${DEVEL_PORT:-8190}:8188"
     user: root

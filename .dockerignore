@@ -2,5 +2,9 @@
 docker/.env
 docker/.buildx-cache
 docker/.buildx-cache-new
+docker/.buildx-cache-bootstrap
+docker/.buildx-cache-bootstrap-new
+docker/.buildx-cache-final
+docker/.buildx-cache-final-new
 storage
 README.md
