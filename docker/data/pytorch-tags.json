@@ -1,0 +1,156 @@
+{
+  "source_urls": {
+    "locally": "https://pytorch.org/get-started/locally/",
+    "previous_versions": "https://pytorch.org/get-started/previous-versions/",
+    "wheel_index": "https://download.pytorch.org/whl/",
+    "xformers": "https://pypi.org/pypi/xformers/json"
+  },
+  "generated_at": "2026-05-31T07:32:22.030604+00:00",
+  "wheel_index_verified": true,
+  "versions": {
+    "2.11.0": {
+      "torchvision": "0.26.0",
+      "torchaudio": "2.11.0",
+      "cuda_profiles": [
+        "cu126",
+        "cu128",
+        "cu130"
+      ],
+      "xformers": {
+        "version": "0.0.35",
+        "torch_requirement": "torch>=2.10",
+        "cuda_profiles": [
+          "cu126",
+          "cu128",
+          "cu130"
+        ]
+      }
+    },
+    "2.10.0": {
+      "torchvision": "0.25.0",
+      "torchaudio": "2.10.0",
+      "cuda_profiles": [
+        "cu126",
+        "cu128",
+        "cu130"
+      ],
+      "xformers": {
+        "version": "0.0.34",
+        "torch_requirement": "torch==2.10.0",
+        "cuda_profiles": [
+          "cu126",
+          "cu128",
+          "cu130"
+        ]
+      }
+    },
+    "2.9.1": {
+      "torchvision": "0.24.1",
+      "torchaudio": "2.9.1",
+      "cuda_profiles": [
+        "cu126",
+        "cu128",
+        "cu130"
+      ],
+      "xformers": {
+        "version": "0.0.33.post2",
+        "torch_requirement": "torch==2.9.1",
+        "cuda_profiles": [
+          "cu126",
+          "cu128",
+          "cu130"
+        ]
+      }
+    },
+    "2.9.0": {
+      "torchvision": "0.24.0",
+      "torchaudio": "2.9.0",
+      "cuda_profiles": [
+        "cu126",
+        "cu128",
+        "cu130"
+      ],
+      "xformers": {
+        "version": "0.0.33.post1",
+        "torch_requirement": "torch==2.9.0",
+        "cuda_profiles": [
+          "cu126",
+          "cu128",
+          "cu130"
+        ]
+      }
+    },
+    "2.8.0": {
+      "torchvision": "0.23.0",
+      "torchaudio": "2.8.0",
+      "cuda_profiles": [
+        "cu126",
+        "cu128",
+        "cu129"
+      ],
+      "xformers": {
+        "version": "0.0.32.post2",
+        "torch_requirement": "torch==2.8.0",
+        "cuda_profiles": [
+          "cu126",
+          "cu128",
+          "cu129"
+        ]
+      }
+    },
+    "2.7.1": {
+      "torchvision": "0.22.1",
+      "torchaudio": "2.7.1",
+      "cuda_profiles": [
+        "cu118",
+        "cu126",
+        "cu128"
+      ],
+      "xformers": {
+        "version": "0.0.31.post1",
+        "torch_requirement": "torch==2.7.1",
+        "cuda_profiles": [
+          "cu118",
+          "cu126",
+          "cu128"
+        ]
+      }
+    },
+    "2.7.0": {
+      "torchvision": "0.22.0",
+      "torchaudio": "2.7.0",
+      "cuda_profiles": [
+        "cu118",
+        "cu126",
+        "cu128"
+      ],
+      "xformers": {
+        "version": "0.0.30",
+        "torch_requirement": "torch==2.7.0",
+        "cuda_profiles": [
+          "cu118",
+          "cu126",
+          "cu128"
+        ]
+      }
+    },
+    "2.6.0": {
+      "torchvision": "0.21.0",
+      "torchaudio": "2.6.0",
+      "cuda_profiles": [
+        "cu118",
+        "cu124",
+        "cu126"
+      ],
+      "xformers": {
+        "version": "0.0.29.post3",
+        "torch_requirement": "torch==2.6.0",
+        "cuda_profiles": [
+          "cu118",
+          "cu124",
+          "cu126"
+        ]
+      }
+    }
+  }
+}

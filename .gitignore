@@ -1,4 +1,5 @@
 docker/.env
+docker/.buildx-cache-v2/
 docker/.buildx-cache/
 docker/.buildx-cache-new/
 docker/.buildx-cache-bootstrap/
@@ -6,3 +7,7 @@ docker/.buildx-cache-bootstrap-new/
 docker/.buildx-cache-final/
 docker/.buildx-cache-final-new/
 storage/
+
+# Python cache
+__pycache__/
+*.pyc

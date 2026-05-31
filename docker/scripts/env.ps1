@@ -85,7 +85,8 @@ function Save-VersionConfig {
     param(
         [string]$Path,
         [string]$ImageName,
-        [string]$CudaProfile,
+        [string]$CudaImageVersion,
+        [string]$PyTorchCudaProfile,
         [string]$UbuntuVersion,
         [string]$MiniforgeInstallerUrl,
         [string]$PythonVersion,
@@ -96,7 +97,8 @@ function Save-VersionConfig {
     )
 
     Set-EnvValue -Path $Path -Name 'IMAGE_NAME' -Value $ImageName
-    Set-EnvValue -Path $Path -Name 'CUDA_PROFILE' -Value $CudaProfile
+    Set-EnvValue -Path $Path -Name 'CUDA_IMAGE_VERSION' -Value $CudaImageVersion
+    Set-EnvValue -Path $Path -Name 'PYTORCH_CUDA_PROFILE' -Value $PyTorchCudaProfile
     Set-EnvValue -Path $Path -Name 'UBUNTU_VERSION' -Value $UbuntuVersion
     Set-EnvValue -Path $Path -Name 'MINIFORGE_INSTALLER_URL' -Value $MiniforgeInstallerUrl
     Set-EnvValue -Path $Path -Name 'PYTHON_VERSION' -Value $PythonVersion
@@ -114,7 +116,8 @@ function Get-VersionConfig {
 
     return @{
         ImageName = Use-EnvValue -Values $Values -Name 'IMAGE_NAME' -CurrentValue $Defaults.ImageName
-        CudaProfile = Use-EnvValue -Values $Values -Name 'CUDA_PROFILE' -CurrentValue $Defaults.CudaProfile
+        CudaImageVersion = Use-EnvValue -Values $Values -Name 'CUDA_IMAGE_VERSION' -CurrentValue $Defaults.CudaImageVersion
+        PyTorchCudaProfile = Use-EnvValue -Values $Values -Name 'PYTORCH_CUDA_PROFILE' -CurrentValue (Use-EnvValue -Values $Values -Name 'CUDA_PROFILE' -CurrentValue $Defaults.PyTorchCudaProfile)
         UbuntuVersion = Use-EnvValue -Values $Values -Name 'UBUNTU_VERSION' -CurrentValue $Defaults.UbuntuVersion
         MiniforgeInstallerUrl = Use-EnvValue -Values $Values -Name 'MINIFORGE_INSTALLER_URL' -CurrentValue $Defaults.MiniforgeInstallerUrl
         PythonVersion = Use-EnvValue -Values $Values -Name 'PYTHON_VERSION' -CurrentValue $Defaults.PythonVersion
@@ -133,7 +136,8 @@ function Merge-BoundVersionConfig {
 
     $parameterMap = @{
         ImageName = 'ImageName'
-        CudaProfile = 'CudaProfile'
+        CudaImageVersion = 'CudaImageVersion'
+        PyTorchCudaProfile = 'PyTorchCudaProfile'
         UbuntuVersion = 'UbuntuVersion'
         MiniforgeInstallerUrl = 'MiniforgeInstallerUrl'
         PythonVersion = 'PythonVersion'

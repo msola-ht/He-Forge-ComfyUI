@@ -30,7 +30,8 @@ function Show-CacheState {
     param(
         [string]$Label,
         [string]$CacheDir,
-        [string]$CacheNewDir
+        [string]$CacheNewDir,
+        [string]$BaseDir = ''
     )
 
     $cacheExists = Test-Path $CacheDir
@@ -40,7 +41,19 @@ function Show-CacheState {
 
     $cacheName = Split-Path -Leaf $CacheDir
     $cacheNewName = Split-Path -Leaf $CacheNewDir
+    if ($BaseDir) {
+        $cacheName = [System.IO.Path]::GetRelativePath($BaseDir, $CacheDir).Replace('\', '/')
+        $cacheNewName = [System.IO.Path]::GetRelativePath($BaseDir, $CacheNewDir).Replace('\', '/')
+    }
 
     Write-Host "[$Label] docker/$cacheName exists=$cacheExists size=$cacheSize"
     Write-Host "[$Label] docker/$cacheNewName exists=$cacheNewExists size=$cacheNewSize"
+}
+
+function Test-BuildKitLocalCache {
+    param(
+        [string]$Path
+    )
+
+    return (Test-Path (Join-Path $Path 'index.json')) -and (Test-Path (Join-Path $Path 'blobs'))
 }

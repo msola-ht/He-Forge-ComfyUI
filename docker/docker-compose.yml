@@ -1,6 +1,6 @@
 services:
   comfyui-runtime:
-    image: ${IMAGE_NAME:-hegenai/comfyui}:${CUDA_PROFILE:-cu128}-runtime
+    image: ${IMAGE_NAME:-hegenai/comfyui}:${RUNTIME_IMAGE_TAG:-ubuntu22.04-py312-cu128-torch2.7.0-runtime}
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -11,10 +11,18 @@ services:
         PYTHON_VERSION: ${PYTHON_VERSION:-3.12}
         COMFYUI_REPO: ${COMFYUI_REPO:-https://github.com/Comfy-Org/ComfyUI.git}
         COMFYUI_REF: ${COMFYUI_REF:-master}
-        CUDA_PROFILE: ${CUDA_PROFILE:-cu128}
-        UBUNTU_VERSION: ${UBUNTU_VERSION:-22}
+        CUDA_PROFILE: ${PYTORCH_CUDA_PROFILE:-cu128}
+        UBUNTU_VERSION: ${UBUNTU_VERSION:-22.04}
+        UBUNTU_CACHE_KEY: ${UBUNTU_CACHE_KEY:-ubuntu2204}
+        APT_CACHE_KEY: ${APT_CACHE_KEY:-cuda12.8.2-ubuntu2204}
+        CONDA_CACHE_KEY: ${CONDA_CACHE_KEY:-conda-py312}
+        PIP_CACHE_KEY: ${PIP_CACHE_KEY:-pip-py312-torch2.7.0-cu128}
+        PYTORCH_INDEX_URL: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}
         NODEJS_VERSION: ${NODEJS_VERSION:-22}
         TORCH_VERSION: ${TORCH_VERSION:-2.7.0}
+        TORCHVISION_VERSION: ${TORCHVISION_VERSION:-0.22.0}
+        TORCHAUDIO_VERSION: ${TORCHAUDIO_VERSION:-2.7.0}
+        XFORMERS_VERSION: ${XFORMERS_VERSION:-}
     ports:
       - "${RUNTIME_PORT:-8188}:8188"
     user: root
@@ -36,7 +44,7 @@ services:
     gpus: all
 
   comfyui-devel:
-    image: ${IMAGE_NAME:-hegenai/comfyui}:${CUDA_PROFILE:-cu128}-devel
+    image: ${IMAGE_NAME:-hegenai/comfyui}:${DEVEL_IMAGE_TAG:-ubuntu22.04-py312-cu128-torch2.7.0-devel}
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -47,10 +55,18 @@ services:
         PYTHON_VERSION: ${PYTHON_VERSION:-3.12}
         COMFYUI_REPO: ${COMFYUI_REPO:-https://github.com/Comfy-Org/ComfyUI.git}
         COMFYUI_REF: ${COMFYUI_REF:-master}
-        CUDA_PROFILE: ${CUDA_PROFILE:-cu128}
-        UBUNTU_VERSION: ${UBUNTU_VERSION:-22}
+        CUDA_PROFILE: ${PYTORCH_CUDA_PROFILE:-cu128}
+        UBUNTU_VERSION: ${UBUNTU_VERSION:-22.04}
+        UBUNTU_CACHE_KEY: ${UBUNTU_CACHE_KEY:-ubuntu2204}
+        APT_CACHE_KEY: ${APT_CACHE_KEY:-cuda12.8.2-ubuntu2204}
+        CONDA_CACHE_KEY: ${CONDA_CACHE_KEY:-conda-py312}
+        PIP_CACHE_KEY: ${PIP_CACHE_KEY:-pip-py312-torch2.7.0-cu128}
+        PYTORCH_INDEX_URL: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}
         NODEJS_VERSION: ${NODEJS_VERSION:-22}
         TORCH_VERSION: ${TORCH_VERSION:-2.7.0}
+        TORCHVISION_VERSION: ${TORCHVISION_VERSION:-0.22.0}
+        TORCHAUDIO_VERSION: ${TORCHAUDIO_VERSION:-2.7.0}
+        XFORMERS_VERSION: ${XFORMERS_VERSION:-}
     ports:
       - "${DEVEL_PORT:-8190}:8188"
     user: root

@@ -10,9 +10,10 @@
 - `fnm`：镜像内置，并默认安装 `Node.js 22`
 - `uv`：镜像内置，可直接用于 Python 包和环境管理
 - `PyTorch`：默认安装 `torch==2.7.0`、`torchvision==0.22.0`、`torchaudio==2.7.0`
-- `PyTorch CUDA 源`：由 `CudaProfile` 自动匹配
+- `xformers`：默认跟随 `TorchVersion` 自动解析，和 PyTorch 在同一个 pip 安装步骤里安装
+- `PyTorch CUDA 源`：由 `PYTORCH_CUDA_PROFILE` 自动匹配
 
-`PyTorch` 构建时只需要选择 `TorchVersion`，脚本会自动匹配对应的 `torchvision` 和 `torchaudio`。
+`PyTorch` 构建时只需要选择 `TorchVersion`，脚本会自动匹配对应的 `torchvision`、`torchaudio` 和 `xformers`。
 `Python` 也不是锁死补丁版本，默认按 `3.12` 这样的前缀安装。
 `Miniforge` 默认直接跟随官方最新发布版本。
 镜像内默认使用 `root` 权限运行，`ComfyUI` 工作目录位于 `/root/ComfyUI`。
@@ -21,18 +22,38 @@
 当前和运行环境强相关的目录已经统一迁到 `/root` 体系，包含 `ComfyUI`、`ComfyUI-seed`、`miniforge`、`fnm` 与相关缓存目录。
 镜像内同时内置 `uv` / `uvx`，并默认使用 `/root/.cache/uv` 作为缓存目录。
 
-## CUDA 配置
+## CUDA 与 PyTorch 源
 
-- `cu128`
-  - Docker 镜像：`nvidia/cuda:12.8.2-*-ubuntu<UBUNTU_VERSION>.04`
-  - PyTorch 源：`https://download.pytorch.org/whl/cu128`
-- `cu126`
-  - Docker 镜像：`nvidia/cuda:12.6.3-*-ubuntu<UBUNTU_VERSION>.04`
-  - PyTorch 源：`https://download.pytorch.org/whl/cu126`
+这里有两层版本，不再硬绑定：
+
+- `CUDA_IMAGE_VERSION`：控制 Docker 基础镜像，例如 `nvidia/cuda:12.8.2-runtime-ubuntu22.04`
+- `PYTORCH_CUDA_PROFILE`：控制 PyTorch wheel 源，例如 `https://download.pytorch.org/whl/cu128`
 
 默认推荐使用 `runtime`，`devel` 适合需要编译额外依赖或自定义节点的场景。
 
-Docker 构建阶段会根据 `CudaProfile` 自动选择对应的 `devel` 镜像，最终镜像再切换到你选择的 `runtime` 或 `devel`，这样更有利于编译依赖和复用缓存。
+Docker 构建阶段会根据 `CUDA_IMAGE_VERSION` 和 `UBUNTU_VERSION` 自动选择对应的 `devel` 镜像，最终镜像再切换到你选择的 `runtime` 或 `devel`，这样更有利于编译依赖和复用缓存。
+CUDA 镜像版本来自 NVIDIA 官方 `supported-tags.md` 生成的本地清单：`docker/data/cuda-tags.json`。
+PyTorch 版本矩阵来自 PyTorch 官方安装文档和 `xformers` PyPI 元数据生成的本地清单：`docker/data/pytorch-tags.json`。
+
+更新 CUDA 镜像标签清单：
+
+```powershell
+.\docker\update-cuda-tags.ps1
+```
+
+该脚本会调用 `python docker/scripts/update-cuda-tags.py` 拉取并解析 NVIDIA 官方标签文档，然后刷新 `docker/data/cuda-tags.json`。
+
+更新 PyTorch 版本矩阵：
+
+```powershell
+.\docker\update-pytorch-tags.ps1
+```
+
+如果希望额外访问 `download.pytorch.org` wheel index 做二次确认，会同时校验 `torch` 和 `xformers` wheel 是否存在：
+
+```powershell
+.\docker\update-pytorch-tags.ps1 -VerifyWheels
+```
 
 ## 目录结构
 
@@ -48,6 +69,7 @@ Docker 相关文件已经集中到 `docker/` 目录，推荐结构如下：
 - `docker/scripts/versions.ps1`
 - `docker/scripts/prompt.ps1`
 - `docker/scripts/cache.ps1`
+- `docker/scripts/test.ps1`
 - `docker/scripts/entrypoint.sh`
 
 ## 关键目录
@@ -91,11 +113,12 @@ Docker 相关文件已经集中到 `docker/` 目录，推荐结构如下：
 ```
 
 `build.ps1` 会读取当前 `docker/.env`，先询问是否修改版本配置；如果修改，会保存回 `docker/.env`，然后继续询问这次要跑 `bootstrap` 还是 `final`，最后直接开始构建。
+在交互模式下，脚本还会继续询问“构建完成后是否运行镜像自检”，默认会直接执行自检。
 
 如果你想临时覆盖 `.env` 中的部分版本配置，也可以通过参数构建：
 
 ```powershell
-.\docker\build.ps1 -CudaProfile cu128 -UbuntuVersion 22 -TorchVersion 2.7.0
+.\docker\build.ps1 -CudaImageVersion 12.8.2 -PyTorchCudaProfile cu128 -UbuntuVersion 22.04 -TorchVersion 2.7.0
 ```
 
 如果你想先预热系统和基础工具层，不安装 `PyTorch` 和 `ComfyUI requirements`，可以先构建 `bootstrap`：
@@ -118,16 +141,39 @@ Docker 相关文件已经集中到 `docker/` 目录，推荐结构如下：
 .\docker\build.ps1 -FromEnv -BuildStage final
 ```
 
+如果你希望跳过交互、并在构建成功后自动输出镜像自检结果，可以加 `-TestAfterBuild`：
+
+```powershell
+.\docker\build.ps1 -FromEnv -BuildStage final -TestAfterBuild
+```
+
+`bootstrap` 阶段会测试 `Python`、`Node.js`、`npm`、`uv`、`ComfyUI seed` 和 `Miniforge` 路径。
+`final` 阶段会额外测试 `PyTorch`、`torchvision`、`torchaudio`、`xformers`、CUDA 可用性、GPU 名称和 `ComfyUI` Python 导入。
+
+镜像 tag 会随关键版本自动变化，规则为：
+
+```text
+final:     <IMAGE_NAME>:ubuntu<UBUNTU_VERSION>-py<PYTHON_VERSION>-<PYTORCH_CUDA_PROFILE>-torch<TORCH_VERSION>-<Variant>
+bootstrap: <IMAGE_NAME>:ubuntu<UBUNTU_VERSION>-py<PYTHON_VERSION>-<PYTORCH_CUDA_PROFILE>-torch<TORCH_VERSION>-bootstrap-<Variant>
+```
+
+例如默认配置会生成：
+
+```text
+hegenai/comfyui:ubuntu22.04-py312-cu128-torch2.7.0-runtime
+hegenai/comfyui:ubuntu22.04-py312-cu128-torch2.7.0-bootstrap-runtime
+```
+
 构建 `devel`：
 
 ```powershell
 .\docker\build.ps1 -Variant devel
 ```
 
-切换 CUDA 配置：
+切换 PyTorch CUDA 源：
 
 ```powershell
-.\docker\build.ps1 -CudaProfile cu126
+.\docker\build.ps1 -PyTorchCudaProfile cu126
 ```
 
 固定 ComfyUI 提交或标签：
@@ -138,14 +184,15 @@ Docker 相关文件已经集中到 `docker/` 目录，推荐结构如下：
 
 构建时会在 `docker/` 目录生成：
 
-- `docker/.buildx-cache-bootstrap`
-- `docker/.buildx-cache-bootstrap-new`
-- `docker/.buildx-cache-final`
-- `docker/.buildx-cache-final-new`
+- `docker/.buildx-cache-v2/bootstrap/<版本组合>`
+- `docker/.buildx-cache-v2/bootstrap/<版本组合>-new`
+- `docker/.buildx-cache-v2/final/<版本组合>`
+- `docker/.buildx-cache-v2/final/<版本组合>-new`
 
 脚本会按阶段自动轮换缓存目录，避免 `final` 阶段覆盖 `bootstrap` 阶段已经跑出来的缓存。
 `final` 阶段会同时读取 `bootstrap` 缓存和 `final` 缓存，但只更新 `final` 缓存。
-如果你之前已经生成过旧的 `docker/.buildx-cache`，脚本会在新阶段缓存还不存在时把它作为兼容来源读取一次。
+如果你之前已经生成过旧的 `docker/.buildx-cache`，脚本会在新阶段缓存还不存在时把它作为兼容来源读取一次；新缓存统一写入 `docker/.buildx-cache-v2`，避免新旧布局混在一起。
+版本组合会包含 Docker CUDA 镜像版本、PyTorch CUDA 源、Ubuntu、Torch、Python 和镜像类型，因此不同版本不会互相覆盖；相同版本组合重复构建则会复用同一个缓存。
 
 APT 构建缓存会保留在 BuildKit cache 中，包括：
 
@@ -153,6 +200,7 @@ APT 构建缓存会保留在 BuildKit cache 中，包括：
 - `/var/lib/apt/lists`
 
 因此 `apt-get update` 这条命令仍然会执行，但不会再每次从零下载完整索引和 `.deb` 包。首次成功构建后，后续重复构建会优先复用对应阶段缓存中导出的 APT 缓存。
+APT cache mount 会按 `CUDA_IMAGE_VERSION + UBUNTU_VERSION` 隔离；pip cache mount 会按 `PYTHON_VERSION + TORCH_VERSION + PYTORCH_CUDA_PROFILE` 隔离；conda 包缓存会按 `PYTHON_VERSION` 隔离。
 
 ## 运行方式
 
@@ -162,24 +210,29 @@ APT 构建缓存会保留在 BuildKit cache 中，包括：
 Copy-Item .\docker\.env.example .\docker\.env
 ```
 
-如果你要切换 CUDA 配置，例如改成 `cu126`，只需要修改 `.env` 里的选择项：
+如果你要切换 Docker CUDA 镜像或 PyTorch CUDA 源，只需要修改 `.env` 里的选择项：
 
 ```dotenv
-CUDA_PROFILE=cu126
-UBUNTU_VERSION=22
+CUDA_IMAGE_VERSION=12.8.2
+PYTORCH_CUDA_PROFILE=cu128
+UBUNTU_VERSION=22.04
 ```
 
-`CUDA_VERSION` 和 `PyTorch` 下载源不需要在 `.env` 里手写，构建入口会根据 `CUDA_PROFILE` 自动推导：
+`CUDA_VERSION` 不需要在 `.env` 里手写，构建入口会根据 `CUDA_IMAGE_VERSION` 和 `UBUNTU_VERSION` 自动推导实际基础镜像。
+`PyTorch` 下载源则根据 `PYTORCH_CUDA_PROFILE` 自动推导：
 
-- `cu128 -> CUDA 12.8.2`
-- `cu126 -> CUDA 12.6.3`
 - `cu128 -> https://download.pytorch.org/whl/cu128`
 - `cu126 -> https://download.pytorch.org/whl/cu126`
+- `cu124 -> https://download.pytorch.org/whl/cu124`
+- `cu118 -> https://download.pytorch.org/whl/cu118`
 
-`UBUNTU_VERSION` 只填写主版本号，当前支持：
+`PYTORCH_CUDA_PROFILE` 和 `xformers` 会按 `TORCH_VERSION` 联动，实际可选项以 `docker/data/pytorch-tags.json` 为准。
+如果 PyTorch 官方发布了新版本，运行 `.\docker\update-pytorch-tags.ps1` 后，交互菜单会自动读取新的版本矩阵。
 
-- `22 -> ubuntu22.04`
-- `24 -> ubuntu24.04`
+`UBUNTU_VERSION` 填写完整 Ubuntu 版本号，当前支持：
+
+- `22.04 -> ubuntu22.04`
+- `24.04 -> ubuntu24.04`
 
 如果你要改 ComfyUI 挂载目录，也可以直接在 `.env` 里改：
 
@@ -254,7 +307,8 @@ DEVEL_UV_CACHE_DIR=../storage/devel/cache/uv
 
 可以通过 `docker/build.ps1` 覆盖这些参数：
 
-- `-CudaProfile`
+- `-CudaImageVersion`
+- `-PyTorchCudaProfile`
 - `-BuildStage`
 - `-UbuntuVersion`
 - `-MiniforgeInstallerUrl`
@@ -264,13 +318,15 @@ DEVEL_UV_CACHE_DIR=../storage/devel/cache/uv
 - `-NodeJsVersion`
 - `-TorchVersion`
 - `-FromEnv`
+- `-TestAfterBuild`
 
 版本配置入口为 `docker/configure.ps1`，它只负责交互式写入 `docker/.env`。
 构建入口统一为 `docker/build.ps1`。直接运行 `.\docker\build.ps1` 会先确认版本配置，再选择构建阶段并开始构建。
 如果要跳过所有交互并使用 `docker/.env`，使用 `.\docker\build.ps1 -FromEnv -BuildStage final` 或 `.\docker\build.ps1 -FromEnv -BuildStage bootstrap`。
 
 `docker compose` 推荐通过 `docker/compose.ps1` 间接调用，主要负责启动、停止、查看日志等运行期操作。
-`compose.ps1` 会读取 `docker/.env`，并根据 `CUDA_PROFILE` 和 `UBUNTU_VERSION` 推导实际 CUDA 镜像标签。
+`compose.ps1` 会读取 `docker/.env`，并根据 `CUDA_IMAGE_VERSION` 和 `UBUNTU_VERSION` 推导实际 CUDA 镜像标签。
+同时也会根据 `CUDA_IMAGE_VERSION`、`PYTORCH_CUDA_PROFILE`、`UBUNTU_VERSION`、`TORCH_VERSION` 推导运行镜像 tag，确保 `compose` 启动的是当前版本组合对应的镜像。
 其中 `docker/.env` 里只保留真正会被运行入口读取的变量；像 `COMFYUI_SEED_DIR`、`MINIFORGE_DIR`、`FNM_DIR` 这类镜像内部固定路径不再放进 `.env`，避免误导。
 
 例如：
@@ -278,7 +334,8 @@ DEVEL_UV_CACHE_DIR=../storage/devel/cache/uv
 ```powershell
 .\docker\build.ps1 `
   -Variant runtime `
-  -CudaProfile cu128 `
+  -CudaImageVersion 12.8.2 `
+  -PyTorchCudaProfile cu128 `
   -ComfyUIRef master `
   -MiniforgeInstallerUrl "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh" `
   -NodeJsVersion 22 `
@@ -290,7 +347,8 @@ DEVEL_UV_CACHE_DIR=../storage/devel/cache/uv
 ```powershell
 .\docker\build.ps1 `
   -Variant runtime `
-  -CudaProfile cu126 `
+  -CudaImageVersion 12.6.3 `
+  -PyTorchCudaProfile cu126 `
   -TorchVersion 2.7.1
 ```
 
@@ -301,17 +359,16 @@ DEVEL_UV_CACHE_DIR=../storage/devel/cache/uv
 - `NodeJsVersion` 当前只允许 `22` 或 `24`
 - `uv` / `uvx` 通过官方镜像复制二进制方式内置，默认跟随 `ghcr.io/astral-sh/uv:latest`
 - `PyTorch` 已在镜像构建阶段安装，不需要进入容器后再手动安装
-- `build.ps1` 的 BuildKit 本地缓存保存在宿主机 `docker/.buildx-cache*`，不会打进最终镜像
+- `build.ps1` 的 BuildKit 本地缓存保存在宿主机 `docker/.buildx-cache-v2*`，不会打进最终镜像
 - `docker compose` 默认额外挂载 `pip/conda/npm/uv` 运行时缓存目录，方便容器内后续安装复用缓存，但这些缓存也不属于镜像内容
-- `build.ps1` 会严格校验并映射 `TorchVersion`；具体 `torchvision/torchaudio` 由 Dockerfile 内部统一推导
+- `build.ps1` 会严格校验并映射 `TorchVersion`；具体 `torchvision/torchaudio` 由本地 PyTorch 版本矩阵统一推导
+- `xformers` 会从同一份版本矩阵解析；如果当前 `TorchVersion + PYTORCH_CUDA_PROFILE` 没有匹配 wheel，则不会强行安装，避免 pip 改写 PyTorch 版本
 - 构建入口统一为 `.\docker\build.ps1`，这样本地 BuildKit cache 轮换、镜像预拉取、版本校验都在一条链路里完成
 - `BuildStage=bootstrap` 只预热系统、Python、ComfyUI 源码、Node 和 uv；`BuildStage=final` 才安装 PyTorch 和 ComfyUI 依赖
-- 当前默认安装命令等价于 `pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url <随 CudaProfile 自动匹配>`
-- 当前内置匹配：
-- `2.7.1 -> torchvision 0.22.1 -> torchaudio 2.7.1`
-- `2.7.0 -> torchvision 0.22.0 -> torchaudio 2.7.0`
-- `2.6.0 -> torchvision 0.21.0 -> torchaudio 2.6.0`
-- 如果你要更换 CUDA 与 Docker 基础镜像，直接传 `-CudaProfile`
+- 当前默认安装命令等价于 `pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 xformers==0.0.30 --index-url <随 PyTorchCudaProfile 自动匹配>`
+- 当前内置匹配来自 `docker/data/pytorch-tags.json`，默认包含官方页面解析到的 `torch/torchvision/torchaudio/xformers` 对应关系
+- 如果你要更换 Docker CUDA 基础镜像，直接传 `-CudaImageVersion`
+- 如果你要更换 PyTorch CUDA wheel 源，直接传 `-PyTorchCudaProfile`
 - 如果你要更换 Node.js 主版本，直接传 `-NodeJsVersion`
 - 如果你要更换版本，直接在构建时传 `-TorchVersion`
 - 如果你使用 `docker compose`，推荐通过 `.\docker\compose.ps1` 调用；它只负责运行期操作，构建仍然使用 `.\docker\build.ps1`

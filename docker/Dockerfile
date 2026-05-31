@@ -14,9 +14,15 @@ ARG PYTHON_VERSION=3.12
 ARG COMFYUI_REPO=https://github.com/Comfy-Org/ComfyUI.git
 ARG COMFYUI_REF=master
 ARG CUDA_PROFILE=cu128
-ARG UBUNTU_VERSION=22
+ARG UBUNTU_VERSION=22.04
+ARG UBUNTU_CACHE_KEY=ubuntu2204
+ARG APT_CACHE_KEY=cuda12.8.2-ubuntu2204
+ARG CONDA_CACHE_KEY=conda-py312
 ARG NODEJS_VERSION=22
 ARG TORCH_VERSION=2.7.0
+ARG TORCHVISION_VERSION=0.22.0
+ARG TORCHAUDIO_VERSION=2.7.0
+ARG XFORMERS_VERSION=
 
 ENV CONDA_DIR=/root/miniforge \
     CONDA_ENV_NAME=comfyui \
@@ -24,8 +30,8 @@ ENV CONDA_DIR=/root/miniforge \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONUNBUFFERED=1
 
-RUN --mount=type=cache,id=apt-cache-ubuntu${UBUNTU_VERSION}04,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,id=apt-lists-ubuntu${UBUNTU_VERSION}04,target=/var/lib/apt/lists,sharing=locked \
+RUN --mount=type=cache,id=apt-cache-${APT_CACHE_KEY},target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=apt-lists-${APT_CACHE_KEY},target=/var/lib/apt/lists,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean \
     && printf 'Binary::apt::APT::Keep-Downloaded-Packages "true";\n' > /etc/apt/apt.conf.d/keep-cache \
     && apt-get update \
@@ -49,7 +55,7 @@ RUN curl -fsSL -o /tmp/miniforge.sh "${MINIFORGE_INSTALLER_URL}" \
 
 ENV PATH=${CONDA_DIR}/bin:${PATH}
 
-RUN --mount=type=cache,target=/root/miniforge/pkgs,sharing=locked \
+RUN --mount=type=cache,id=${CONDA_CACHE_KEY},target=/root/miniforge/pkgs,sharing=locked \
     conda config --system --set auto_update_conda false \
     && conda config --system --set channel_priority strict \
     && conda create -y -n "${CONDA_ENV_NAME}" python="${PYTHON_VERSION}" pip \
@@ -67,24 +73,22 @@ RUN git init . \
 
 FROM builder-bootstrap AS builder
 
-RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
-    case "${CUDA_PROFILE}" in \
-        cu128) export PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu128 ;; \
-        cu126) export PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu126 ;; \
-        *) echo "Unsupported CUDA_PROFILE: ${CUDA_PROFILE}" >&2; exit 1 ;; \
-    esac \
-    && case "${TORCH_VERSION}" in \
-        2.7.1) export TORCHVISION_VERSION=0.22.1 TORCHAUDIO_VERSION=2.7.1 ;; \
-        2.7.0) export TORCHVISION_VERSION=0.22.0 TORCHAUDIO_VERSION=2.7.0 ;; \
-        2.6.0) export TORCHVISION_VERSION=0.21.0 TORCHAUDIO_VERSION=2.6.0 ;; \
-        *) echo "Unsupported TORCH_VERSION: ${TORCH_VERSION}" >&2; exit 1 ;; \
-    esac \
-    && python -m pip install --upgrade pip setuptools wheel \
-    && python -m pip install \
+ARG PIP_CACHE_KEY=pip-py312-torch2.7.0-cu128
+ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu128
+ARG TORCH_VERSION=2.7.0
+ARG TORCHVISION_VERSION=0.22.0
+ARG TORCHAUDIO_VERSION=2.7.0
+ARG XFORMERS_VERSION=
+
+RUN --mount=type=cache,id=${PIP_CACHE_KEY},target=/root/.cache/pip,sharing=locked \
+    python -m pip install --upgrade pip setuptools wheel \
+    && PYTORCH_PACKAGES=( \
         "torch==${TORCH_VERSION}" \
         "torchvision==${TORCHVISION_VERSION}" \
         "torchaudio==${TORCHAUDIO_VERSION}" \
-        --index-url "${PYTORCH_INDEX_URL}" \
+    ) \
+    && if [[ -n "${XFORMERS_VERSION}" ]]; then PYTORCH_PACKAGES+=("xformers==${XFORMERS_VERSION}"); fi \
+    && python -m pip install "${PYTORCH_PACKAGES[@]}" --index-url "${PYTORCH_INDEX_URL}" \
     && python -m pip install -r requirements.txt
 
 
@@ -96,7 +100,9 @@ FROM ${FINAL_CUDA_IMAGE} AS bootstrap
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG UBUNTU_VERSION=22
+ARG UBUNTU_VERSION=22.04
+ARG UBUNTU_CACHE_KEY=ubuntu2204
+ARG APT_CACHE_KEY=cuda12.8.2-ubuntu2204
 ARG NODEJS_VERSION=22
 
 ENV CONDA_DIR=/root/miniforge \
@@ -108,8 +114,8 @@ ENV CONDA_DIR=/root/miniforge \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
-RUN --mount=type=cache,id=apt-cache-ubuntu${UBUNTU_VERSION}04,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,id=apt-lists-ubuntu${UBUNTU_VERSION}04,target=/var/lib/apt/lists,sharing=locked \
+RUN --mount=type=cache,id=apt-cache-${APT_CACHE_KEY},target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=apt-lists-${APT_CACHE_KEY},target=/var/lib/apt/lists,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean \
     && printf 'Binary::apt::APT::Keep-Downloaded-Packages "true";\n' > /etc/apt/apt.conf.d/keep-cache \
     && apt-get update \

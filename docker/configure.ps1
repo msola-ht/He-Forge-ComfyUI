@@ -13,8 +13,9 @@ Ensure-EnvFile -EnvFile $envFile -EnvExampleFile $envExampleFile
 
 $defaults = @{
     ImageName = 'hegenai/comfyui'
-    CudaProfile = 'cu128'
-    UbuntuVersion = '22'
+    CudaImageVersion = '12.8.2'
+    PyTorchCudaProfile = 'cu128'
+    UbuntuVersion = '22.04'
     MiniforgeInstallerUrl = 'https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh'
     PythonVersion = '3.12'
     ComfyUIRepo = 'https://github.com/Comfy-Org/ComfyUI.git'
@@ -26,15 +27,16 @@ $defaults = @{
 $versionConfig = Get-VersionConfig -Values (Read-EnvFile -Path $envFile) -Defaults $defaults
 
 Write-Host ""
-Write-Host "Docker version configuration"
-Write-Host "Press Enter to keep current values."
+Write-Host "Docker 版本配置"
+Write-Host "直接回车表示保留当前值。"
 
 $versionConfig = Edit-VersionConfig -Config $versionConfig
 
 Save-VersionConfig `
     -Path $envFile `
     -ImageName $versionConfig.ImageName `
-    -CudaProfile $versionConfig.CudaProfile `
+    -CudaImageVersion $versionConfig.CudaImageVersion `
+    -PyTorchCudaProfile $versionConfig.PyTorchCudaProfile `
     -UbuntuVersion $versionConfig.UbuntuVersion `
     -MiniforgeInstallerUrl $versionConfig.MiniforgeInstallerUrl `
     -PythonVersion $versionConfig.PythonVersion `
@@ -44,6 +46,6 @@ Save-VersionConfig `
     -TorchVersion $versionConfig.TorchVersion
 
 Write-Host ""
-Write-Host "Saved version configuration to docker/.env"
-Write-Host "Next build:"
+Write-Host "已保存版本配置到 docker/.env"
+Write-Host "下一步构建："
 Write-Host "  .\docker\build.ps1"
