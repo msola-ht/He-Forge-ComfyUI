@@ -23,12 +23,17 @@ if ($ComposeArgs -and $ComposeArgs[0] -eq 'build') {
 
 $cudaImageVersion = Use-EnvValue -Values $envValues -Name 'CUDA_IMAGE_VERSION' -CurrentValue '12.8.2'
 $pyTorchCudaProfile = Use-EnvValue -Values $envValues -Name 'PYTORCH_CUDA_PROFILE' -CurrentValue (Use-EnvValue -Values $envValues -Name 'CUDA_PROFILE' -CurrentValue 'cu128')
+$pyTorchIndexUrlOverride = Use-EnvValue -Values $envValues -Name 'PYTORCH_INDEX_URL_OVERRIDE' -CurrentValue ''
 $ubuntuVersion = Use-EnvValue -Values $envValues -Name 'UBUNTU_VERSION' -CurrentValue '22.04'
 $torchVersion = Use-EnvValue -Values $envValues -Name 'TORCH_VERSION' -CurrentValue '2.7.0'
 $pythonVersion = Use-EnvValue -Values $envValues -Name 'PYTHON_VERSION' -CurrentValue '3.12'
 $cudaImageSet = Resolve-CudaImageSet -CudaImageVersion $cudaImageVersion -UbuntuVersion $ubuntuVersion
 Assert-PyTorchCudaProfile -PyTorchCudaProfile $pyTorchCudaProfile -TorchVersion $torchVersion
-$pyTorchIndexUrl = Resolve-PyTorchIndexUrl -PyTorchCudaProfile $pyTorchCudaProfile -TorchVersion $torchVersion
+$pyTorchIndexUrl = if ($pyTorchIndexUrlOverride) {
+    $pyTorchIndexUrlOverride.Replace('{profile}', $pyTorchCudaProfile).Replace('{cuda_profile}', $pyTorchCudaProfile)
+} else {
+    Resolve-PyTorchIndexUrl -PyTorchCudaProfile $pyTorchCudaProfile -TorchVersion $torchVersion
+}
 $pyTorchPackageVersions = Resolve-PyTorchPackageVersions -TorchVersion $torchVersion
 $aptCacheKey = "cuda$cudaImageVersion-$($cudaImageSet.UbuntuCacheKey)"
 $condaCacheKey = "conda-py$($pythonVersion.Replace('.', ''))"

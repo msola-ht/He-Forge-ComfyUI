@@ -9,6 +9,8 @@ FROM ${BUILDER_CUDA_IMAGE} AS builder-bootstrap
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG DEBIAN_FRONTEND=noninteractive
+ARG APT_HTTP_PROXY=
+ARG APT_HTTPS_PROXY=
 ARG MINIFORGE_INSTALLER_URL=https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
 ARG PYTHON_VERSION=3.12
 ARG COMFYUI_REPO=https://github.com/Comfy-Org/ComfyUI.git
@@ -32,22 +34,22 @@ ENV CONDA_DIR=/root/miniforge \
 
 RUN --mount=type=cache,id=apt-cache-${APT_CACHE_KEY},target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=apt-lists-${APT_CACHE_KEY},target=/var/lib/apt/lists,sharing=locked \
-    rm -f /etc/apt/apt.conf.d/docker-clean \
+    packages=(bash ca-certificates curl ffmpeg git git-lfs libgl1 libglib2.0-0 libsm6 libxext6 tini unzip) \
+    && rm -f /etc/apt/apt.conf.d/docker-clean \
+    && rm -f /etc/apt/apt.conf.d/99local-proxy \
+    && if [[ -n "${APT_HTTP_PROXY}" ]]; then printf 'Acquire::http::Proxy "%s";\n' "${APT_HTTP_PROXY}" >> /etc/apt/apt.conf.d/99local-proxy; fi \
+    && if [[ -n "${APT_HTTPS_PROXY}" ]]; then \
+        printf 'Acquire::https::Proxy "%s";\n' "${APT_HTTPS_PROXY}" >> /etc/apt/apt.conf.d/99local-proxy; \
+    else \
+        printf 'Acquire::https::Proxy "DIRECT";\nAcquire::https::Proxy::developer.download.nvidia.com "DIRECT";\n' >> /etc/apt/apt.conf.d/99local-proxy; \
+    fi \
     && printf 'Binary::apt::APT::Keep-Downloaded-Packages "true";\n' > /etc/apt/apt.conf.d/keep-cache \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        bash \
-        ca-certificates \
-        curl \
-        ffmpeg \
-        git \
-        git-lfs \
-        libgl1 \
-        libglib2.0-0 \
-        libsm6 \
-        libxext6 \
-        tini \
-        unzip
+    && if ! (apt-get update && apt-get install -y --no-install-recommends "${packages[@]}"); then \
+        echo "APT proxy path failed, retrying direct." >&2; \
+        rm -f /etc/apt/apt.conf.d/99local-proxy; \
+        apt-get update; \
+        apt-get install -y --no-install-recommends "${packages[@]}"; \
+    fi
 
 RUN curl -fsSL -o /tmp/miniforge.sh "${MINIFORGE_INSTALLER_URL}" \
     && bash /tmp/miniforge.sh -b -p "${CONDA_DIR}" \
@@ -75,10 +77,25 @@ FROM builder-bootstrap AS builder
 
 ARG PIP_CACHE_KEY=pip-py312-torch2.7.0-cu128
 ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu128
+ARG PIP_INDEX_URL=
+ARG PIP_EXTRA_INDEX_URL=
+ARG PIP_TRUSTED_HOST=
 ARG TORCH_VERSION=2.7.0
 ARG TORCHVISION_VERSION=0.22.0
 ARG TORCHAUDIO_VERSION=2.7.0
 ARG XFORMERS_VERSION=
+ARG CUSTOM_NODES_CACHE_KEY=custom-nodes-default
+ARG CUSTOM_NODES_LOCK_B64=e30=
+
+ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL} \
+    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST}
+
+RUN --mount=type=cache,id=${PIP_CACHE_KEY},target=/root/.cache/pip,sharing=locked \
+    python -m pip config set global.disable-pip-version-check true \
+    && if [[ -n "${PIP_INDEX_URL}" ]]; then python -m pip config set global.index-url "${PIP_INDEX_URL}"; fi \
+    && if [[ -n "${PIP_EXTRA_INDEX_URL}" ]]; then python -m pip config set global.extra-index-url "${PIP_EXTRA_INDEX_URL}"; fi \
+    && if [[ -n "${PIP_TRUSTED_HOST}" ]]; then python -m pip config set global.trusted-host "${PIP_TRUSTED_HOST}"; fi
 
 RUN --mount=type=cache,id=${PIP_CACHE_KEY},target=/root/.cache/pip,sharing=locked \
     python -m pip install --upgrade pip setuptools wheel \
@@ -88,8 +105,23 @@ RUN --mount=type=cache,id=${PIP_CACHE_KEY},target=/root/.cache/pip,sharing=locke
         "torchaudio==${TORCHAUDIO_VERSION}" \
     ) \
     && if [[ -n "${XFORMERS_VERSION}" ]]; then PYTORCH_PACKAGES+=("xformers==${XFORMERS_VERSION}"); fi \
-    && python -m pip install "${PYTORCH_PACKAGES[@]}" --index-url "${PYTORCH_INDEX_URL}" \
-    && python -m pip install -r requirements.txt
+    && python -m pip install "${PYTORCH_PACKAGES[@]}" --index-url "${PYTORCH_INDEX_URL}"
+
+RUN --mount=type=cache,id=${PIP_CACHE_KEY},target=/root/.cache/pip,sharing=locked \
+    python -m pip install -r requirements.txt
+
+COPY docker/scripts/install-plugins.py /tmp/install-plugins.py
+
+RUN --mount=type=cache,id=${PIP_CACHE_KEY}-plugins-${CUSTOM_NODES_CACHE_KEY},target=/root/.cache/pip,sharing=locked \
+    printf '%s' "${CUSTOM_NODES_LOCK_B64}" | base64 -d > /tmp/custom-nodes-lock.json \
+    && \
+    python /tmp/install-plugins.py \
+        --manifest /tmp/custom-nodes-lock.json \
+        --comfyui-dir /root/ComfyUI-src \
+        --torch-version "${TORCH_VERSION}" \
+        --torchvision-version "${TORCHVISION_VERSION}" \
+        --torchaudio-version "${TORCHAUDIO_VERSION}" \
+        --xformers-version "${XFORMERS_VERSION}"
 
 
 FROM ${UV_IMAGE} AS uv-binary
@@ -100,6 +132,8 @@ FROM ${FINAL_CUDA_IMAGE} AS bootstrap
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG DEBIAN_FRONTEND=noninteractive
+ARG APT_HTTP_PROXY=
+ARG APT_HTTPS_PROXY=
 ARG UBUNTU_VERSION=22.04
 ARG UBUNTU_CACHE_KEY=ubuntu2204
 ARG APT_CACHE_KEY=cuda12.8.2-ubuntu2204
@@ -116,22 +150,22 @@ ENV CONDA_DIR=/root/miniforge \
 
 RUN --mount=type=cache,id=apt-cache-${APT_CACHE_KEY},target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=apt-lists-${APT_CACHE_KEY},target=/var/lib/apt/lists,sharing=locked \
-    rm -f /etc/apt/apt.conf.d/docker-clean \
+    packages=(bash ca-certificates curl ffmpeg git git-lfs libgl1 libglib2.0-0 libsm6 libxext6 tini unzip) \
+    && rm -f /etc/apt/apt.conf.d/docker-clean \
+    && rm -f /etc/apt/apt.conf.d/99local-proxy \
+    && if [[ -n "${APT_HTTP_PROXY}" ]]; then printf 'Acquire::http::Proxy "%s";\n' "${APT_HTTP_PROXY}" >> /etc/apt/apt.conf.d/99local-proxy; fi \
+    && if [[ -n "${APT_HTTPS_PROXY}" ]]; then \
+        printf 'Acquire::https::Proxy "%s";\n' "${APT_HTTPS_PROXY}" >> /etc/apt/apt.conf.d/99local-proxy; \
+    else \
+        printf 'Acquire::https::Proxy "DIRECT";\nAcquire::https::Proxy::developer.download.nvidia.com "DIRECT";\n' >> /etc/apt/apt.conf.d/99local-proxy; \
+    fi \
     && printf 'Binary::apt::APT::Keep-Downloaded-Packages "true";\n' > /etc/apt/apt.conf.d/keep-cache \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        bash \
-        ca-certificates \
-        curl \
-        ffmpeg \
-        git \
-        git-lfs \
-        libgl1 \
-        libglib2.0-0 \
-        libsm6 \
-        libxext6 \
-        tini \
-        unzip
+    && if ! (apt-get update && apt-get install -y --no-install-recommends "${packages[@]}"); then \
+        echo "APT proxy path failed, retrying direct." >&2; \
+        rm -f /etc/apt/apt.conf.d/99local-proxy; \
+        apt-get update; \
+        apt-get install -y --no-install-recommends "${packages[@]}"; \
+    fi
 
 COPY --from=builder-bootstrap /root/miniforge /root/miniforge
 COPY --from=builder-bootstrap /root/ComfyUI-src /root/ComfyUI-seed

@@ -104,6 +104,11 @@ function Show-VersionConfig {
     Write-Host "  NODEJS_VERSION=$($Config.NodeJsVersion)"
     Write-Host "  PYTHON_VERSION=$($Config.PythonVersion)"
     Write-Host "  COMFYUI_REF=$($Config.ComfyUIRef)"
+    if ($Config.AptHttpProxy) { Write-Host "  APT_HTTP_PROXY=$($Config.AptHttpProxy)" }
+    if ($Config.AptHttpsProxy) { Write-Host "  APT_HTTPS_PROXY=$($Config.AptHttpsProxy)" }
+    if ($Config.PipIndexUrl) { Write-Host "  PIP_INDEX_URL=$($Config.PipIndexUrl)" }
+    if ($Config.PipExtraIndexUrl) { Write-Host "  PIP_EXTRA_INDEX_URL=$($Config.PipExtraIndexUrl)" }
+    if ($Config.PyTorchIndexUrlOverride) { Write-Host "  PYTORCH_INDEX_URL_OVERRIDE=$($Config.PyTorchIndexUrlOverride)" }
 }
 
 function Edit-VersionConfig {
@@ -118,6 +123,12 @@ function Edit-VersionConfig {
     $Config.NodeJsVersion = Select-Option -Label 'Node.js 版本' -CurrentValue $Config.NodeJsVersion -Options (Get-NodeJsVersionOptions)
     $Config.PythonVersion = Select-TextValue -Label 'Python 版本前缀' -CurrentValue $Config.PythonVersion
     $Config.ComfyUIRef = Select-TextValue -Label 'ComfyUI 引用（分支、标签或提交）' -CurrentValue $Config.ComfyUIRef
+    $Config.AptHttpProxy = Select-TextValue -Label 'APT HTTP 代理（留空表示直连）' -CurrentValue $Config.AptHttpProxy
+    $Config.AptHttpsProxy = Select-TextValue -Label 'APT HTTPS 代理（留空表示直连）' -CurrentValue $Config.AptHttpsProxy
+    $Config.PipIndexUrl = Select-TextValue -Label 'pip 主索引 URL（留空表示默认 PyPI）' -CurrentValue $Config.PipIndexUrl
+    $Config.PipExtraIndexUrl = Select-TextValue -Label 'pip 额外索引 URL（留空表示不使用）' -CurrentValue $Config.PipExtraIndexUrl
+    $Config.PipTrustedHost = Select-TextValue -Label 'pip trusted-host（留空表示不设置）' -CurrentValue $Config.PipTrustedHost
+    $Config.PyTorchIndexUrlOverride = Select-TextValue -Label 'PyTorch 源覆盖 URL（留空表示按 CUDA Profile 自动推导）' -CurrentValue $Config.PyTorchIndexUrlOverride
     $Config.ImageName = Select-TextValue -Label '镜像名称' -CurrentValue $Config.ImageName
 
     return $Config

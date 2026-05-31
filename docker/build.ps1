@@ -27,6 +27,18 @@ param(
 
     [string]$TorchVersion = '2.7.0',
 
+    [string]$AptHttpProxy = '',
+
+    [string]$AptHttpsProxy = '',
+
+    [string]$PipIndexUrl = '',
+
+    [string]$PipExtraIndexUrl = '',
+
+    [string]$PipTrustedHost = '',
+
+    [string]$PyTorchIndexUrlOverride = '',
+
     [switch]$FromEnv,
 
     [switch]$Push,
@@ -43,6 +55,8 @@ $root = Split-Path -Parent $dockerDir
 $scriptDir = Join-Path $dockerDir 'scripts'
 $envFile = Join-Path $dockerDir '.env'
 $envExampleFile = Join-Path $dockerDir '.env.example'
+$pluginManifestFile = Join-Path $dockerDir 'plugins/custom-nodes.json'
+$pluginLockResolver = Join-Path $scriptDir 'resolve-plugin-lock.py'
 
 . (Join-Path $scriptDir 'env.ps1')
 . (Join-Path $scriptDir 'versions.ps1')
@@ -63,6 +77,12 @@ $defaults = @{
     ComfyUIRef = $ComfyUIRef
     NodeJsVersion = $NodeJsVersion
     TorchVersion = $TorchVersion
+    AptHttpProxy = $AptHttpProxy
+    AptHttpsProxy = $AptHttpsProxy
+    PipIndexUrl = $PipIndexUrl
+    PipExtraIndexUrl = $PipExtraIndexUrl
+    PipTrustedHost = $PipTrustedHost
+    PyTorchIndexUrlOverride = $PyTorchIndexUrlOverride
 }
 
 $versionConfig = Get-VersionConfig -Values (Read-EnvFile -Path $envFile) -Defaults $defaults
@@ -78,6 +98,12 @@ $ComfyUIRepo = $versionConfig.ComfyUIRepo
 $ComfyUIRef = $versionConfig.ComfyUIRef
 $NodeJsVersion = $versionConfig.NodeJsVersion
 $TorchVersion = $versionConfig.TorchVersion
+$AptHttpProxy = $versionConfig.AptHttpProxy
+$AptHttpsProxy = $versionConfig.AptHttpsProxy
+$PipIndexUrl = $versionConfig.PipIndexUrl
+$PipExtraIndexUrl = $versionConfig.PipExtraIndexUrl
+$PipTrustedHost = $versionConfig.PipTrustedHost
+$PyTorchIndexUrlOverride = $versionConfig.PyTorchIndexUrlOverride
 
 if (-not $FromEnv) {
     Show-VersionConfig -Config $versionConfig
@@ -97,7 +123,13 @@ if (-not $FromEnv) {
             -ComfyUIRepo $versionConfig.ComfyUIRepo `
             -ComfyUIRef $versionConfig.ComfyUIRef `
             -NodeJsVersion $versionConfig.NodeJsVersion `
-            -TorchVersion $versionConfig.TorchVersion
+            -TorchVersion $versionConfig.TorchVersion `
+            -AptHttpProxy $versionConfig.AptHttpProxy `
+            -AptHttpsProxy $versionConfig.AptHttpsProxy `
+            -PipIndexUrl $versionConfig.PipIndexUrl `
+            -PipExtraIndexUrl $versionConfig.PipExtraIndexUrl `
+            -PipTrustedHost $versionConfig.PipTrustedHost `
+            -PyTorchIndexUrlOverride $versionConfig.PyTorchIndexUrlOverride
 
         Write-Host ""
         Write-Host "已保存版本配置到 docker/.env"
@@ -112,6 +144,12 @@ if (-not $FromEnv) {
         $ComfyUIRef = $versionConfig.ComfyUIRef
         $NodeJsVersion = $versionConfig.NodeJsVersion
         $TorchVersion = $versionConfig.TorchVersion
+        $AptHttpProxy = $versionConfig.AptHttpProxy
+        $AptHttpsProxy = $versionConfig.AptHttpsProxy
+        $PipIndexUrl = $versionConfig.PipIndexUrl
+        $PipExtraIndexUrl = $versionConfig.PipExtraIndexUrl
+        $PipTrustedHost = $versionConfig.PipTrustedHost
+        $PyTorchIndexUrlOverride = $versionConfig.PyTorchIndexUrlOverride
     }
 }
 
@@ -136,7 +174,11 @@ $ubuntuCacheKey = $cudaImageSet.UbuntuCacheKey
 $aptCacheKey = "cuda$CudaImageVersion-$ubuntuCacheKey"
 $condaCacheKey = "conda-py$($PythonVersion.Replace('.', ''))"
 $pipCacheKey = "pip-py$($PythonVersion.Replace('.', ''))-torch$TorchVersion-$PyTorchCudaProfile"
-$pyTorchIndexUrl = Resolve-PyTorchIndexUrl -PyTorchCudaProfile $PyTorchCudaProfile -TorchVersion $TorchVersion
+$pyTorchIndexUrl = if ($PyTorchIndexUrlOverride) {
+    $PyTorchIndexUrlOverride.Replace('{profile}', $PyTorchCudaProfile).Replace('{cuda_profile}', $PyTorchCudaProfile)
+} else {
+    Resolve-PyTorchIndexUrl -PyTorchCudaProfile $PyTorchCudaProfile -TorchVersion $TorchVersion
+}
 $pyTorchPackageVersions = Resolve-PyTorchPackageVersions -TorchVersion $TorchVersion
 $torchVisionVersion = $pyTorchPackageVersions.TorchVisionVersion
 $torchAudioVersion = $pyTorchPackageVersions.TorchAudioVersion
@@ -145,6 +187,24 @@ $uvImage = 'ghcr.io/astral-sh/uv:latest'
 $tagSuffix = Resolve-ImageTagSuffix -CudaImageVersion $CudaImageVersion -PyTorchCudaProfile $PyTorchCudaProfile -UbuntuVersion $UbuntuVersion -TorchVersion $TorchVersion -PythonVersion $PythonVersion -Variant $Variant -BuildStage $BuildStage
 $tag = "${ImageName}:${tagSuffix}"
 $cacheKeySuffix = Resolve-CacheKeySuffix -CudaImageVersion $CudaImageVersion -PyTorchCudaProfile $PyTorchCudaProfile -UbuntuVersion $UbuntuVersion -TorchVersion $TorchVersion -PythonVersion $PythonVersion -Variant $Variant
+$pluginLockJson = '{"plugins":[]}'
+if ($BuildStage -eq 'final') {
+    try {
+        $pluginLockJson = (& python $pluginLockResolver --manifest $pluginManifestFile)
+        if ($LASTEXITCODE -ne 0 -or -not $pluginLockJson) {
+            throw "插件锁解析失败。"
+        }
+    }
+    catch {
+        throw "解析插件引用失败。请检查网络连通性、git 可用性和插件仓库配置。详细信息：$($_.Exception.Message)"
+    }
+
+    $pluginLockJson = $pluginLockJson.Trim()
+}
+
+$customNodesHashBytes = [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($pluginLockJson))
+$customNodesHash = ([System.BitConverter]::ToString($customNodesHashBytes)).Replace('-', '').Substring(0, 12).ToLowerInvariant()
+$customNodesLockB64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($pluginLockJson))
 
 if ($Push -and $TestAfterBuild) {
     throw "TestAfterBuild 需要本地已加载的镜像。请不要和 -Push 一起使用。"
@@ -159,8 +219,9 @@ $legacyFinalCacheNewDir = Join-Path $dockerDir '.buildx-cache-final-new'
 $cacheRootDir = Join-Path $dockerDir '.buildx-cache-v2'
 $bootstrapCacheDir = Join-Path $cacheRootDir "bootstrap/$cacheKeySuffix"
 $bootstrapCacheNewDir = Join-Path $cacheRootDir "bootstrap/$cacheKeySuffix-new"
-$finalCacheDir = Join-Path $cacheRootDir "final/$cacheKeySuffix"
-$finalCacheNewDir = Join-Path $cacheRootDir "final/$cacheKeySuffix-new"
+$finalCacheKeySuffix = "$cacheKeySuffix-plugins$customNodesHash"
+$finalCacheDir = Join-Path $cacheRootDir "final/$finalCacheKeySuffix"
+$finalCacheNewDir = Join-Path $cacheRootDir "final/$finalCacheKeySuffix-new"
 $cacheDir = if ($BuildStage -eq 'bootstrap') { $bootstrapCacheDir } else { $finalCacheDir }
 $cacheNewDir = if ($BuildStage -eq 'bootstrap') { $bootstrapCacheNewDir } else { $finalCacheNewDir }
 
@@ -176,6 +237,8 @@ $arguments = @(
     '--build-arg', "BUILDER_CUDA_IMAGE=$builderCudaImage",
     '--build-arg', "FINAL_CUDA_IMAGE=$finalCudaImage",
     '--build-arg', "MINIFORGE_INSTALLER_URL=$MiniforgeInstallerUrl",
+    '--build-arg', "APT_HTTP_PROXY=$AptHttpProxy",
+    '--build-arg', "APT_HTTPS_PROXY=$AptHttpsProxy",
     '--build-arg', "PYTHON_VERSION=$PythonVersion",
     '--build-arg', "COMFYUI_REPO=$ComfyUIRepo",
     '--build-arg', "COMFYUI_REF=$ComfyUIRef",
@@ -186,11 +249,16 @@ $arguments = @(
     '--build-arg', "CONDA_CACHE_KEY=$condaCacheKey",
     '--build-arg', "PIP_CACHE_KEY=$pipCacheKey",
     '--build-arg', "PYTORCH_INDEX_URL=$pyTorchIndexUrl",
+    '--build-arg', "PIP_INDEX_URL=$PipIndexUrl",
+    '--build-arg', "PIP_EXTRA_INDEX_URL=$PipExtraIndexUrl",
+    '--build-arg', "PIP_TRUSTED_HOST=$PipTrustedHost",
     '--build-arg', "NODEJS_VERSION=$NodeJsVersion",
     '--build-arg', "TORCH_VERSION=$TorchVersion",
     '--build-arg', "TORCHVISION_VERSION=$torchVisionVersion",
     '--build-arg', "TORCHAUDIO_VERSION=$torchAudioVersion",
     '--build-arg', "XFORMERS_VERSION=$xformersVersion",
+    '--build-arg', "CUSTOM_NODES_CACHE_KEY=$customNodesHash",
+    '--build-arg', "CUSTOM_NODES_LOCK_B64=$customNodesLockB64",
     '--cache-to', "type=local,dest=$cacheNewDir,mode=max"
 )
 
@@ -203,6 +271,21 @@ if ($BuildStage -eq 'bootstrap' -and -not (Test-Path $cacheDir) -and (Test-Build
 }
 if ($BuildStage -eq 'final' -and -not (Test-Path $cacheDir) -and (Test-BuildKitLocalCache -Path $legacyFinalCacheDir)) {
     $cacheFromDirs += $legacyFinalCacheDir
+}
+if ($BuildStage -eq 'final') {
+    $finalCacheParentDir = Join-Path $cacheRootDir 'final'
+    if (Test-Path $finalCacheParentDir) {
+        $relatedFinalCaches = Get-ChildItem -LiteralPath $finalCacheParentDir -Directory | Where-Object {
+            $_.Name -like "$cacheKeySuffix*" -and
+            $_.Name -ne (Split-Path -Leaf $cacheDir) -and
+            $_.Name -notlike '*-new' -and
+            (Test-BuildKitLocalCache -Path $_.FullName)
+        } | Sort-Object Name
+
+        foreach ($relatedFinalCache in $relatedFinalCaches) {
+            $cacheFromDirs += $relatedFinalCache.FullName
+        }
+    }
 }
 if ($BuildStage -eq 'final' -and (Test-Path $bootstrapCacheDir)) {
     $cacheFromDirs += $bootstrapCacheDir
@@ -236,6 +319,22 @@ try {
     Show-CacheState -Label 'LegacyFinalCache' -CacheDir $legacyFinalCacheDir -CacheNewDir $legacyFinalCacheNewDir -BaseDir $dockerDir
     if ($BuildStage -eq 'final') {
         Show-CacheState -Label 'BootstrapCache' -CacheDir $bootstrapCacheDir -CacheNewDir $bootstrapCacheNewDir -BaseDir $dockerDir
+        Write-Host "[PluginLock] hash=$customNodesHash"
+    }
+    if ($AptHttpProxy) {
+        Write-Host "[BuildProxy] APT_HTTP_PROXY=$AptHttpProxy"
+    }
+    if ($AptHttpsProxy) {
+        Write-Host "[BuildProxy] APT_HTTPS_PROXY=$AptHttpsProxy"
+    }
+    if ($PipIndexUrl) {
+        Write-Host "[BuildProxy] PIP_INDEX_URL=$PipIndexUrl"
+    }
+    if ($PipExtraIndexUrl) {
+        Write-Host "[BuildProxy] PIP_EXTRA_INDEX_URL=$PipExtraIndexUrl"
+    }
+    if ($PyTorchIndexUrlOverride) {
+        Write-Host "[BuildProxy] PYTORCH_INDEX_URL_OVERRIDE=$PyTorchIndexUrlOverride"
     }
 
     $pullImages = @($builderCudaImage, $finalCudaImage, $uvImage) | Select-Object -Unique

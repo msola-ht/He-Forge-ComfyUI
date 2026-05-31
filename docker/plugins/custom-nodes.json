@@ -1,0 +1,26 @@
+{
+  "plugins": [
+    {
+      "id": "comfyui-manager",
+      "name": "ComfyUI Manager",
+      "repo": "https://github.com/Comfy-Org/ComfyUI-Manager.git",
+      "ref": "main",
+      "directory": "comfyui-manager",
+      "requirements_files": [
+        "requirements.txt"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "comfyui-dd-translation",
+      "name": "ComfyUI DD Translation",
+      "repo": "https://github.com/Dontdrunk/ComfyUI-DD-Translation.git",
+      "ref": "main",
+      "directory": "ComfyUI-DD-Translation",
+      "requirements_files": [
+        "requirements.txt"
+      ],
+      "enabled": true
+    }
+  ]
+}

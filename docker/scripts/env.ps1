@@ -93,7 +93,13 @@ function Save-VersionConfig {
         [string]$ComfyUIRepo,
         [string]$ComfyUIRef,
         [string]$NodeJsVersion,
-        [string]$TorchVersion
+        [string]$TorchVersion,
+        [string]$AptHttpProxy,
+        [string]$AptHttpsProxy,
+        [string]$PipIndexUrl,
+        [string]$PipExtraIndexUrl,
+        [string]$PipTrustedHost,
+        [string]$PyTorchIndexUrlOverride
     )
 
     Set-EnvValue -Path $Path -Name 'IMAGE_NAME' -Value $ImageName
@@ -106,6 +112,12 @@ function Save-VersionConfig {
     Set-EnvValue -Path $Path -Name 'COMFYUI_REF' -Value $ComfyUIRef
     Set-EnvValue -Path $Path -Name 'NODEJS_VERSION' -Value $NodeJsVersion
     Set-EnvValue -Path $Path -Name 'TORCH_VERSION' -Value $TorchVersion
+    Set-EnvValue -Path $Path -Name 'APT_HTTP_PROXY' -Value $AptHttpProxy
+    Set-EnvValue -Path $Path -Name 'APT_HTTPS_PROXY' -Value $AptHttpsProxy
+    Set-EnvValue -Path $Path -Name 'PIP_INDEX_URL' -Value $PipIndexUrl
+    Set-EnvValue -Path $Path -Name 'PIP_EXTRA_INDEX_URL' -Value $PipExtraIndexUrl
+    Set-EnvValue -Path $Path -Name 'PIP_TRUSTED_HOST' -Value $PipTrustedHost
+    Set-EnvValue -Path $Path -Name 'PYTORCH_INDEX_URL_OVERRIDE' -Value $PyTorchIndexUrlOverride
 }
 
 function Get-VersionConfig {
@@ -125,6 +137,12 @@ function Get-VersionConfig {
         ComfyUIRef = Use-EnvValue -Values $Values -Name 'COMFYUI_REF' -CurrentValue $Defaults.ComfyUIRef
         NodeJsVersion = Use-EnvValue -Values $Values -Name 'NODEJS_VERSION' -CurrentValue $Defaults.NodeJsVersion
         TorchVersion = Use-EnvValue -Values $Values -Name 'TORCH_VERSION' -CurrentValue $Defaults.TorchVersion
+        AptHttpProxy = Use-EnvValue -Values $Values -Name 'APT_HTTP_PROXY' -CurrentValue $Defaults.AptHttpProxy
+        AptHttpsProxy = Use-EnvValue -Values $Values -Name 'APT_HTTPS_PROXY' -CurrentValue $Defaults.AptHttpsProxy
+        PipIndexUrl = Use-EnvValue -Values $Values -Name 'PIP_INDEX_URL' -CurrentValue $Defaults.PipIndexUrl
+        PipExtraIndexUrl = Use-EnvValue -Values $Values -Name 'PIP_EXTRA_INDEX_URL' -CurrentValue $Defaults.PipExtraIndexUrl
+        PipTrustedHost = Use-EnvValue -Values $Values -Name 'PIP_TRUSTED_HOST' -CurrentValue $Defaults.PipTrustedHost
+        PyTorchIndexUrlOverride = Use-EnvValue -Values $Values -Name 'PYTORCH_INDEX_URL_OVERRIDE' -CurrentValue $Defaults.PyTorchIndexUrlOverride
     }
 }
 
@@ -145,6 +163,12 @@ function Merge-BoundVersionConfig {
         ComfyUIRef = 'ComfyUIRef'
         NodeJsVersion = 'NodeJsVersion'
         TorchVersion = 'TorchVersion'
+        AptHttpProxy = 'AptHttpProxy'
+        AptHttpsProxy = 'AptHttpsProxy'
+        PipIndexUrl = 'PipIndexUrl'
+        PipExtraIndexUrl = 'PipExtraIndexUrl'
+        PipTrustedHost = 'PipTrustedHost'
+        PyTorchIndexUrlOverride = 'PyTorchIndexUrlOverride'
     }
 
     foreach ($parameterName in $parameterMap.Keys) {

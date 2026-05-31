@@ -12,6 +12,7 @@
 - `PyTorch`：默认安装 `torch==2.7.0`、`torchvision==0.22.0`、`torchaudio==2.7.0`
 - `xformers`：默认跟随 `TorchVersion` 自动解析，和 PyTorch 在同一个 pip 安装步骤里安装
 - `PyTorch CUDA 源`：由 `PYTORCH_CUDA_PROFILE` 自动匹配
+- `custom nodes`：默认内置 `ComfyUI Manager` 和 `ComfyUI DD Translation`
 
 `PyTorch` 构建时只需要选择 `TorchVersion`，脚本会自动匹配对应的 `torchvision`、`torchaudio` 和 `xformers`。
 `Python` 也不是锁死补丁版本，默认按 `3.12` 这样的前缀安装。
@@ -21,6 +22,37 @@
 当前 Node 只支持主版本 `22` 或 `24`。
 当前和运行环境强相关的目录已经统一迁到 `/root` 体系，包含 `ComfyUI`、`ComfyUI-seed`、`miniforge`、`fnm` 与相关缓存目录。
 镜像内同时内置 `uv` / `uvx`，并默认使用 `/root/.cache/uv` 作为缓存目录。
+内置 custom nodes 会先安装到 `/root/ComfyUI-seed/custom_nodes`，首次启动时再随 seed 目录同步到挂载的 `/root/ComfyUI/custom_nodes`。
+
+## 内置插件
+
+当前插件清单位于：
+
+```text
+docker/plugins/custom-nodes.json
+```
+
+默认启用两个测试插件：
+
+- `ComfyUI Manager`：`https://github.com/Comfy-Org/ComfyUI-Manager.git`
+- `ComfyUI DD Translation`：`https://github.com/Dontdrunk/ComfyUI-DD-Translation.git`
+
+插件安装由 `docker/scripts/install-plugins.py` 统一处理，流程为：
+
+- 读取 `docker/plugins/custom-nodes.json`
+- 构建前通过 `docker/scripts/resolve-plugin-lock.py` 把插件引用解析为真实 commit
+- 克隆启用的插件到 `/root/ComfyUI-src/custom_nodes`
+- 如果插件目录存在 `requirements.txt`，则自动安装依赖
+- 安装插件依赖时会使用 PyTorch 相关 constraints，避免插件 requirements 意外改写 `torch`、`torchvision`、`torchaudio` 或 `xformers` 版本
+
+插件清单和解析后的真实 commit 变化后，`final` 阶段缓存目录会自动附加插件锁哈希，例如：
+
+```text
+docker/.buildx-cache-v2/final/<版本组合>-plugins<插件锁哈希>
+```
+
+这样插件仓库即使仍然写分支名，只要上游提交变化，`final` 缓存也会自动切到新的插件锁版本；与此同时，不同插件组合不会互相覆盖最终阶段缓存，仍然可以继续复用 `bootstrap` 阶段和 PyTorch 大层缓存。
+构建脚本也会尝试把同版本的旧 `final` 缓存作为 `cache-from` 来源，因此在插件清单或插件 commit 变化后，后续第一次完整构建仍有机会复用之前的 PyTorch 与 Python 依赖层，而不是全部重下。
 
 ## CUDA 与 PyTorch 源
 
@@ -71,6 +103,9 @@ Docker 相关文件已经集中到 `docker/` 目录，推荐结构如下：
 - `docker/scripts/cache.ps1`
 - `docker/scripts/test.ps1`
 - `docker/scripts/entrypoint.sh`
+- `docker/scripts/install-plugins.py`
+- `docker/scripts/resolve-plugin-lock.py`
+- `docker/plugins/custom-nodes.json`
 
 ## 关键目录
 
@@ -149,6 +184,7 @@ Docker 相关文件已经集中到 `docker/` 目录，推荐结构如下：
 
 `bootstrap` 阶段会测试 `Python`、`Node.js`、`npm`、`uv`、`ComfyUI seed` 和 `Miniforge` 路径。
 `final` 阶段会额外测试 `PyTorch`、`torchvision`、`torchaudio`、`xformers`、CUDA 可用性、GPU 名称和 `ComfyUI` Python 导入。
+如果当前镜像内置了 custom nodes，自检也会检查 `ComfyUI Manager` 和 `ComfyUI DD Translation` 是否存在于 `/root/ComfyUI/custom_nodes`。
 
 镜像 tag 会随关键版本自动变化，规则为：
 
@@ -201,6 +237,58 @@ APT 构建缓存会保留在 BuildKit cache 中，包括：
 
 因此 `apt-get update` 这条命令仍然会执行，但不会再每次从零下载完整索引和 `.deb` 包。首次成功构建后，后续重复构建会优先复用对应阶段缓存中导出的 APT 缓存。
 APT cache mount 会按 `CUDA_IMAGE_VERSION + UBUNTU_VERSION` 隔离；pip cache mount 会按 `PYTHON_VERSION + TORCH_VERSION + PYTORCH_CUDA_PROFILE` 隔离；conda 包缓存会按 `PYTHON_VERSION` 隔离。
+
+如果你所在环境对带宽比较敏感，推荐额外配置局域网代理或镜像：
+
+- `APT_HTTP_PROXY`
+  适合接 `apt-cacher-ng`、局域网代理或上级缓存。
+- `APT_HTTPS_PROXY`
+  默认建议留空直连，避免 NVIDIA CUDA 这类 `https` 源被普通 HTTP 代理的 `CONNECT` 限制拦住。
+- `PIP_INDEX_URL` / `PIP_EXTRA_INDEX_URL` / `PIP_TRUSTED_HOST`
+  适合接 `devpi`、`Nexus`、`Artifactory` 或局域网 PyPI 镜像。
+- `PYTORCH_INDEX_URL_OVERRIDE`
+  如果你做了局域网 PyTorch wheel 镜像，可以直接覆盖默认的 `https://download.pytorch.org/whl/<profile>`。
+
+例如：
+
+```dotenv
+APT_HTTP_PROXY=http://192.168.1.10:3142
+APT_HTTPS_PROXY=
+PIP_INDEX_URL=http://192.168.1.10:3141/root/pypi/+simple/
+PIP_TRUSTED_HOST=192.168.1.10
+PYTORCH_INDEX_URL_OVERRIDE=http://192.168.1.10:8080/pytorch/cu128
+```
+
+这样即使 `apt-get update` 和 `pip install` 继续执行，请求也会优先走局域网缓存，而不是每次都直接打外网。
+
+如果你想先在本机快速挂一套缓存容器，这个仓库也内置了两个可选服务：
+
+- `apt-cacher-ng`
+- `devpi`
+- `pytorch-proxy`
+
+启动缓存服务：
+
+```powershell
+.\docker\compose.ps1 --profile cache up -d apt-cacher-ng devpi pytorch-proxy
+```
+
+然后把 `docker/.env` 改成：
+
+```dotenv
+APT_HTTP_PROXY=http://host.docker.internal:3142
+APT_HTTPS_PROXY=
+PIP_INDEX_URL=http://host.docker.internal:3141/root/pypi/+simple/
+PIP_TRUSTED_HOST=host.docker.internal
+PYTORCH_INDEX_URL_OVERRIDE=http://host.docker.internal:3143/whl/{profile}
+```
+
+这里的 `{profile}` 会在构建时自动替换成当前的 `PYTORCH_CUDA_PROFILE`，例如：
+
+- `cu128 -> http://host.docker.internal:3143/whl/cu128`
+- `cu126 -> http://host.docker.internal:3143/whl/cu126`
+
+这样后续 `build.ps1` 再执行 `apt-get update`、`pip install`、`pip install torch... --index-url ...` 时，会优先打到你本机这些缓存容器，而不是每次都直接出公网。
 
 ## 运行方式
 
@@ -259,6 +347,24 @@ DEVEL_NPM_CACHE_DIR=../storage/devel/cache/npm
 DEVEL_UV_CACHE_DIR=../storage/devel/cache/uv
 ```
 
+如果你还希望容器运行后在镜像内继续 `pip install` 也走局域网源，可以把下面这些变量一起写进 `docker/.env`，`compose` 启动时会自动带进去：
+
+```dotenv
+PIP_INDEX_URL=http://192.168.1.10:3141/root/pypi/+simple/
+PIP_EXTRA_INDEX_URL=
+PIP_TRUSTED_HOST=192.168.1.10
+```
+
+注意一件事：你现在已经有运行时 `pip` 缓存挂载了，也就是：
+
+```dotenv
+RUNTIME_PIP_CACHE_DIR=../storage/runtime/cache/pip
+DEVEL_PIP_CACHE_DIR=../storage/devel/cache/pip
+```
+
+这能帮助“容器启动后再手动 `pip install`”的场景复用缓存。
+但 Docker 构建阶段的 `pip install` 主要还是走 BuildKit cache 和上面的 `devpi` 更有效，因为构建期并不是普通容器运行时的 bind mount 模式。
+
 启动 `runtime`：
 
 ```powershell
@@ -302,6 +408,8 @@ DEVEL_UV_CACHE_DIR=../storage/devel/cache/uv
 - `custom_nodes`
 - `main.py`
 - 以及其余源码文件
+
+如果宿主机挂载目录已经存在旧的 `ComfyUI` 内容，入口脚本不会整体覆盖它；但现在会把镜像内置且当前目录中缺失的 `custom_nodes` 定向补齐进去。这样新镜像增加插件后，不需要清空整个挂载目录也能把缺失插件同步进来。
 
 ## 自定义参数
 
@@ -373,4 +481,5 @@ DEVEL_UV_CACHE_DIR=../storage/devel/cache/uv
 - 如果你要更换版本，直接在构建时传 `-TorchVersion`
 - 如果你使用 `docker compose`，推荐通过 `.\docker\compose.ps1` 调用；它只负责运行期操作，构建仍然使用 `.\docker\build.ps1`
 - 如果你希望构建可复现，建议把 `ComfyUIRef` 固定为具体 tag 或 commit
+- 如果你希望插件构建完全可复现，建议把 `docker/plugins/custom-nodes.json` 中每个插件的 `ref` 固定为 tag 或 commit
 - 当前只保留 `runtime` 和 `devel` 两种最终镜像

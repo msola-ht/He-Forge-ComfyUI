@@ -1,28 +1,45 @@
 services:
-  comfyui-runtime:
-    image: ${IMAGE_NAME:-hegenai/comfyui}:${RUNTIME_IMAGE_TAG:-ubuntu22.04-py312-cu128-torch2.7.0-runtime}
+  apt-cacher-ng:
     build:
       context: ..
-      dockerfile: docker/Dockerfile
-      args:
-        BUILDER_CUDA_IMAGE: ${BUILDER_CUDA_IMAGE:-nvidia/cuda:12.8.2-devel-ubuntu22.04}
-        FINAL_CUDA_IMAGE: ${RUNTIME_CUDA_IMAGE:-nvidia/cuda:12.8.2-runtime-ubuntu22.04}
-        MINIFORGE_INSTALLER_URL: ${MINIFORGE_INSTALLER_URL:-https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh}
-        PYTHON_VERSION: ${PYTHON_VERSION:-3.12}
-        COMFYUI_REPO: ${COMFYUI_REPO:-https://github.com/Comfy-Org/ComfyUI.git}
-        COMFYUI_REF: ${COMFYUI_REF:-master}
-        CUDA_PROFILE: ${PYTORCH_CUDA_PROFILE:-cu128}
-        UBUNTU_VERSION: ${UBUNTU_VERSION:-22.04}
-        UBUNTU_CACHE_KEY: ${UBUNTU_CACHE_KEY:-ubuntu2204}
-        APT_CACHE_KEY: ${APT_CACHE_KEY:-cuda12.8.2-ubuntu2204}
-        CONDA_CACHE_KEY: ${CONDA_CACHE_KEY:-conda-py312}
-        PIP_CACHE_KEY: ${PIP_CACHE_KEY:-pip-py312-torch2.7.0-cu128}
-        PYTORCH_INDEX_URL: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}
-        NODEJS_VERSION: ${NODEJS_VERSION:-22}
-        TORCH_VERSION: ${TORCH_VERSION:-2.7.0}
-        TORCHVISION_VERSION: ${TORCHVISION_VERSION:-0.22.0}
-        TORCHAUDIO_VERSION: ${TORCHAUDIO_VERSION:-2.7.0}
-        XFORMERS_VERSION: ${XFORMERS_VERSION:-}
+      dockerfile: docker/cache/apt-cacher-ng.Dockerfile
+    image: hegenai/cache-apt-cacher-ng:local
+    profiles:
+      - cache
+    ports:
+      - "${APT_CACHE_PORT:-3142}:3142"
+    volumes:
+      - ${APT_CACHE_DATA_DIR:-../storage/cache-services/apt-cacher-ng}:/var/cache/apt-cacher-ng
+    restart: unless-stopped
+
+  devpi:
+    build:
+      context: ..
+      dockerfile: docker/cache/devpi.Dockerfile
+    image: hegenai/cache-devpi:local
+    profiles:
+      - cache
+    ports:
+      - "${DEVPI_PORT:-3141}:3141"
+    environment:
+      DEVPI_SERVERDIR: /devpi/server
+    volumes:
+      - ${DEVPI_DATA_DIR:-../storage/cache-services/devpi}:/devpi/server
+    restart: unless-stopped
+
+  pytorch-proxy:
+    image: nginx:alpine
+    profiles:
+      - cache
+    ports:
+      - "${PYTORCH_PROXY_PORT:-3143}:80"
+    volumes:
+      - ./cache/nginx-pytorch.conf:/etc/nginx/nginx.conf:ro
+      - ${PYTORCH_PROXY_CACHE_DIR:-../storage/cache-services/pytorch-proxy}:/var/cache/nginx/pytorch
+    restart: unless-stopped
+
+  comfyui-runtime:
+    image: ${IMAGE_NAME:-hegenai/comfyui}:${RUNTIME_IMAGE_TAG:-ubuntu22.04-py312-cu128-torch2.7.0-runtime}
     ports:
       - "${RUNTIME_PORT:-8188}:8188"
     user: root
@@ -30,6 +47,9 @@ services:
       COMFYUI_PORT: "8188"
       COMFYUI_HOME: ${COMFYUI_HOME:-/root/ComfyUI}
       PIP_CACHE_DIR: ${PIP_CACHE_DIR:-/root/.cache/pip}
+      PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+      PIP_EXTRA_INDEX_URL: ${PIP_EXTRA_INDEX_URL:-}
+      PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
       CONDA_PKGS_DIRS: ${CONDA_PKGS_DIRS:-/root/miniforge/pkgs}
       NPM_CONFIG_CACHE: ${NPM_CONFIG_CACHE:-/root/.npm}
       UV_CACHE_DIR: ${UV_CACHE_DIR:-/root/.cache/uv}
@@ -45,28 +65,6 @@ services:
 
   comfyui-devel:
     image: ${IMAGE_NAME:-hegenai/comfyui}:${DEVEL_IMAGE_TAG:-ubuntu22.04-py312-cu128-torch2.7.0-devel}
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-      args:
-        BUILDER_CUDA_IMAGE: ${BUILDER_CUDA_IMAGE:-nvidia/cuda:12.8.2-devel-ubuntu22.04}
-        FINAL_CUDA_IMAGE: ${DEVEL_CUDA_IMAGE:-nvidia/cuda:12.8.2-devel-ubuntu22.04}
-        MINIFORGE_INSTALLER_URL: ${MINIFORGE_INSTALLER_URL:-https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh}
-        PYTHON_VERSION: ${PYTHON_VERSION:-3.12}
-        COMFYUI_REPO: ${COMFYUI_REPO:-https://github.com/Comfy-Org/ComfyUI.git}
-        COMFYUI_REF: ${COMFYUI_REF:-master}
-        CUDA_PROFILE: ${PYTORCH_CUDA_PROFILE:-cu128}
-        UBUNTU_VERSION: ${UBUNTU_VERSION:-22.04}
-        UBUNTU_CACHE_KEY: ${UBUNTU_CACHE_KEY:-ubuntu2204}
-        APT_CACHE_KEY: ${APT_CACHE_KEY:-cuda12.8.2-ubuntu2204}
-        CONDA_CACHE_KEY: ${CONDA_CACHE_KEY:-conda-py312}
-        PIP_CACHE_KEY: ${PIP_CACHE_KEY:-pip-py312-torch2.7.0-cu128}
-        PYTORCH_INDEX_URL: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}
-        NODEJS_VERSION: ${NODEJS_VERSION:-22}
-        TORCH_VERSION: ${TORCH_VERSION:-2.7.0}
-        TORCHVISION_VERSION: ${TORCHVISION_VERSION:-0.22.0}
-        TORCHAUDIO_VERSION: ${TORCHAUDIO_VERSION:-2.7.0}
-        XFORMERS_VERSION: ${XFORMERS_VERSION:-}
     ports:
       - "${DEVEL_PORT:-8190}:8188"
     user: root
@@ -74,6 +72,9 @@ services:
       COMFYUI_PORT: "8188"
       COMFYUI_HOME: ${COMFYUI_HOME:-/root/ComfyUI}
       PIP_CACHE_DIR: ${PIP_CACHE_DIR:-/root/.cache/pip}
+      PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+      PIP_EXTRA_INDEX_URL: ${PIP_EXTRA_INDEX_URL:-}
+      PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
       CONDA_PKGS_DIRS: ${CONDA_PKGS_DIRS:-/root/miniforge/pkgs}
       NPM_CONFIG_CACHE: ${NPM_CONFIG_CACHE:-/root/.npm}
       UV_CACHE_DIR: ${UV_CACHE_DIR:-/root/.cache/uv}

@@ -6,5 +6,6 @@ docker/.buildx-cache-bootstrap
 docker/.buildx-cache-bootstrap-new
 docker/.buildx-cache-final
 docker/.buildx-cache-final-new
+docker/.buildx-cache-v2
 storage
 README.md

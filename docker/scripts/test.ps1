@@ -54,6 +54,16 @@ function Invoke-ImageSmokeTest {
             '-c',
             'import comfy.options; print("comfy_import=ok")'
         )
+        Invoke-DockerTestCommand -Name '内置 custom nodes 插件' -ImageTag $ImageTag -Command @(
+            'bash',
+            '-lc',
+            'test -d /root/ComfyUI/custom_nodes/comfyui-manager && test -d /root/ComfyUI/custom_nodes/ComfyUI-DD-Translation && echo "custom_nodes=ok"'
+        )
+        Invoke-DockerTestCommand -Name '已有目录补齐缺失插件' -ImageTag $ImageTag -Command @(
+            'bash',
+            '-lc',
+            'mkdir -p /tmp/existing-comfyui/custom_nodes && cp /root/ComfyUI-seed/main.py /tmp/existing-comfyui/main.py && COMFYUI_HOME=/tmp/existing-comfyui /usr/local/bin/entrypoint.sh true && test -d /tmp/existing-comfyui/custom_nodes/comfyui-manager && test -d /tmp/existing-comfyui/custom_nodes/ComfyUI-DD-Translation && echo "existing_dir_sync=ok"'
+        )
     }
 
     Write-Host ""
