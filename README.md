@@ -51,7 +51,7 @@ docker/plugins/custom-nodes.json
 docker/.buildx-cache-v2/final/<版本组合>-plugins<插件锁哈希>
 ```
 
-这样插件仓库即使仍然写分支名，只要上游提交变化，`final` 缓存也会自动切到新的插件锁版本；与此同时，不同插件组合不会互相覆盖最终阶段缓存，仍然可以继续复用 `bootstrap` 阶段和 PyTorch 大层缓存。
+这样插件仓库即使仍然写分支名，只要上游提交变化，`final` 缓存也会自动切到新的插件锁版本；与此同时，不同插件组合不会互相覆盖最终阶段缓存，仍然会被保留下来，并可以继续复用 `bootstrap` 阶段和 PyTorch 大层缓存。
 构建脚本也会尝试把同版本的旧 `final` 缓存作为 `cache-from` 来源，因此在插件清单或插件 commit 变化后，后续第一次完整构建仍有机会复用之前的 PyTorch 与 Python 依赖层，而不是全部重下。
 
 ## CUDA 与 PyTorch 源
@@ -141,10 +141,16 @@ Docker 相关文件已经集中到 `docker/` 目录，推荐结构如下：
 
 推荐先确认 Docker Desktop 已启用 `buildx` 和 `BuildKit`。
 
-日常只需要运行一个入口：
+日常只需要运行一个入口。可以直接调用 PowerShell 脚本：
 
 ```powershell
 .\docker\build.ps1
+```
+
+也可以使用根目录 BAT 包装器：
+
+```powershell
+.\构建-ComfyUI.bat
 ```
 
 `build.ps1` 会读取当前 `docker/.env`，先询问是否修改版本配置；如果修改，会保存回 `docker/.env`，然后继续询问这次要跑 `bootstrap` 还是 `final`，最后直接开始构建。
@@ -229,6 +235,7 @@ hegenai/comfyui:ubuntu22.04-py312-cu128-torch2.7.0-bootstrap-runtime
 `final` 阶段会同时读取 `bootstrap` 缓存和 `final` 缓存，但只更新 `final` 缓存。
 如果你之前已经生成过旧的 `docker/.buildx-cache`，脚本会在新阶段缓存还不存在时把它作为兼容来源读取一次；新缓存统一写入 `docker/.buildx-cache-v2`，避免新旧布局混在一起。
 版本组合会包含 Docker CUDA 镜像版本、PyTorch CUDA 源、Ubuntu、Torch、Python 和镜像类型，因此不同版本不会互相覆盖；相同版本组合重复构建则会复用同一个缓存。
+其他构建遗留的 `*-new` 目录只会在足够久未更新后再被清理，避免并发构建时互相删除正在导出的缓存。
 
 APT 构建缓存会保留在 BuildKit cache 中，包括：
 
@@ -241,10 +248,6 @@ APT cache mount 会按 `CUDA_IMAGE_VERSION + UBUNTU_VERSION` 隔离；pip cache 
 
 如果你所在环境对带宽比较敏感，推荐额外配置局域网代理或镜像：
 
-- `APT_HTTP_PROXY`
-  适合接 `apt-cacher-ng`、局域网代理或上级缓存。
-- `APT_HTTPS_PROXY`
-  默认建议留空直连，避免 NVIDIA CUDA 这类 `https` 源被普通 HTTP 代理的 `CONNECT` 限制拦住。
 - `PIP_INDEX_URL` / `PIP_EXTRA_INDEX_URL` / `PIP_TRUSTED_HOST`
   适合接 `devpi`、`Nexus`、`Artifactory` 或局域网 PyPI 镜像。
 - `PYTORCH_INDEX_URL_OVERRIDE`
@@ -253,32 +256,41 @@ APT cache mount 会按 `CUDA_IMAGE_VERSION + UBUNTU_VERSION` 隔离；pip cache 
 例如：
 
 ```dotenv
-APT_HTTP_PROXY=http://192.168.1.10:3142
-APT_HTTPS_PROXY=
 PIP_INDEX_URL=http://192.168.1.10:3141/root/pypi/+simple/
 PIP_TRUSTED_HOST=192.168.1.10
 PYTORCH_INDEX_URL_OVERRIDE=http://192.168.1.10:8080/pytorch/cu128
 ```
 
-这样即使 `apt-get update` 和 `pip install` 继续执行，请求也会优先走局域网缓存，而不是每次都直接打外网。
+这样即使 `pip install` 和 `pip install torch... --index-url ...` 继续执行，请求也会优先走局域网缓存，而不是每次都直接打外网。
 
 如果你想先在本机快速挂一套缓存容器，这个仓库也内置了两个可选服务：
 
-- `apt-cacher-ng`
 - `devpi`
 - `pytorch-proxy`
 
 启动缓存服务：
 
 ```powershell
-.\docker\compose.ps1 --profile cache up -d apt-cacher-ng devpi pytorch-proxy
+.\docker\compose.ps1 --profile cache up -d devpi pytorch-proxy
 ```
 
-然后把 `docker/.env` 改成：
+如果你更习惯从仓库根目录直接双击或调用 BAT，也可以使用：
+
+```powershell
+.\启动-缓存容器.bat
+```
+
+这个入口会先启动缓存容器并等待端口就绪；确认可用后，再按 `.env` 里的 `DEVPI_PORT`、`PYTORCH_PROXY_PORT` 自动把这些值写入 `docker/.env`：
 
 ```dotenv
-APT_HTTP_PROXY=http://host.docker.internal:3142
-APT_HTTPS_PROXY=
+PIP_INDEX_URL=http://host.docker.internal:<DEVPI_PORT>/root/pypi/+simple/
+PIP_TRUSTED_HOST=host.docker.internal
+PYTORCH_INDEX_URL_OVERRIDE=http://host.docker.internal:<PYTORCH_PROXY_PORT>/whl/{profile}
+```
+
+如果你不是通过上面的 BAT，而是手动调用 `.\docker\compose.ps1 --profile cache up ...`，那就再把 `docker/.env` 改成：
+
+```dotenv
 PIP_INDEX_URL=http://host.docker.internal:3141/root/pypi/+simple/
 PIP_TRUSTED_HOST=host.docker.internal
 PYTORCH_INDEX_URL_OVERRIDE=http://host.docker.internal:3143/whl/{profile}
@@ -430,8 +442,8 @@ DEVEL_PIP_CACHE_DIR=../storage/devel/cache/pip
 - `-TestAfterBuild`
 
 版本配置入口为 `docker/configure.ps1`，它只负责交互式写入 `docker/.env`。
-构建入口统一为 `docker/build.ps1`。直接运行 `.\docker\build.ps1` 会先确认版本配置，再选择构建阶段并开始构建。
-如果要跳过所有交互并使用 `docker/.env`，使用 `.\docker\build.ps1 -FromEnv -BuildStage final` 或 `.\docker\build.ps1 -FromEnv -BuildStage bootstrap`。
+构建逻辑统一由 `docker/build.ps1` 负责；根目录 `.\构建-ComfyUI.bat` 只是薄包装调用。直接运行 `.\docker\build.ps1` 或 `.\构建-ComfyUI.bat` 都会先确认版本配置，再选择构建阶段并开始构建。
+如果要跳过所有交互并使用 `docker/.env`，使用 `.\docker\build.ps1 -FromEnv -BuildStage final`、`.\docker\build.ps1 -FromEnv -BuildStage bootstrap`，或者等价地通过 `.\构建-ComfyUI.bat -FromEnv -BuildStage final` 调用。
 
 `docker compose` 推荐通过 `docker/compose.ps1` 间接调用，主要负责启动、停止、查看日志等运行期操作。
 `compose.ps1` 会读取 `docker/.env`，并根据 `CUDA_IMAGE_VERSION` 和 `UBUNTU_VERSION` 推导实际 CUDA 镜像标签。
@@ -504,7 +516,8 @@ storage/runtime/exports/<时间戳>/
 - `docker compose` 默认额外挂载 `pip/conda/npm/uv` 运行时缓存目录，方便容器内后续安装复用缓存，但这些缓存也不属于镜像内容
 - `build.ps1` 会严格校验并映射 `TorchVersion`；具体 `torchvision/torchaudio` 由本地 PyTorch 版本矩阵统一推导
 - `xformers` 会从同一份版本矩阵解析；如果当前 `TorchVersion + PYTORCH_CUDA_PROFILE` 没有匹配 wheel，则不会强行安装，避免 pip 改写 PyTorch 版本
-- 构建入口统一为 `.\docker\build.ps1`，这样本地 BuildKit cache 轮换、镜像预拉取、版本校验都在一条链路里完成
+- 构建逻辑统一收口到 `.\docker\build.ps1`；如果你更习惯双击或从根目录调用，也可以使用只做转发的 `.\构建-ComfyUI.bat`
+- 缓存容器提供了根目录入口 `.\启动-缓存容器.bat`；它会先按 `DEVPI_PORT`、`PYTORCH_PROXY_PORT` 自动写入缓存代理配置到 `docker/.env`，再启动 `devpi`、`pytorch-proxy`
 - `BuildStage=bootstrap` 只预热系统、Python、ComfyUI 源码、Node 和 uv；`BuildStage=final` 才安装 PyTorch 和 ComfyUI 依赖
 - 当前默认安装命令等价于 `pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 xformers==0.0.30 --index-url <随 PyTorchCudaProfile 自动匹配>`
 - 当前内置匹配来自 `docker/data/pytorch-tags.json`，默认包含官方页面解析到的 `torch/torchvision/torchaudio/xformers` 对应关系

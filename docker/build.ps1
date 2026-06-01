@@ -27,10 +27,6 @@ param(
 
     [string]$TorchVersion = '2.7.0',
 
-    [string]$AptHttpProxy = '',
-
-    [string]$AptHttpsProxy = '',
-
     [string]$PipIndexUrl = '',
 
     [string]$PipExtraIndexUrl = '',
@@ -77,8 +73,6 @@ $defaults = @{
     ComfyUIRef = $ComfyUIRef
     NodeJsVersion = $NodeJsVersion
     TorchVersion = $TorchVersion
-    AptHttpProxy = $AptHttpProxy
-    AptHttpsProxy = $AptHttpsProxy
     PipIndexUrl = $PipIndexUrl
     PipExtraIndexUrl = $PipExtraIndexUrl
     PipTrustedHost = $PipTrustedHost
@@ -98,8 +92,6 @@ $ComfyUIRepo = $versionConfig.ComfyUIRepo
 $ComfyUIRef = $versionConfig.ComfyUIRef
 $NodeJsVersion = $versionConfig.NodeJsVersion
 $TorchVersion = $versionConfig.TorchVersion
-$AptHttpProxy = $versionConfig.AptHttpProxy
-$AptHttpsProxy = $versionConfig.AptHttpsProxy
 $PipIndexUrl = $versionConfig.PipIndexUrl
 $PipExtraIndexUrl = $versionConfig.PipExtraIndexUrl
 $PipTrustedHost = $versionConfig.PipTrustedHost
@@ -124,8 +116,6 @@ if (-not $FromEnv) {
             -ComfyUIRef $versionConfig.ComfyUIRef `
             -NodeJsVersion $versionConfig.NodeJsVersion `
             -TorchVersion $versionConfig.TorchVersion `
-            -AptHttpProxy $versionConfig.AptHttpProxy `
-            -AptHttpsProxy $versionConfig.AptHttpsProxy `
             -PipIndexUrl $versionConfig.PipIndexUrl `
             -PipExtraIndexUrl $versionConfig.PipExtraIndexUrl `
             -PipTrustedHost $versionConfig.PipTrustedHost `
@@ -144,8 +134,6 @@ if (-not $FromEnv) {
         $ComfyUIRef = $versionConfig.ComfyUIRef
         $NodeJsVersion = $versionConfig.NodeJsVersion
         $TorchVersion = $versionConfig.TorchVersion
-        $AptHttpProxy = $versionConfig.AptHttpProxy
-        $AptHttpsProxy = $versionConfig.AptHttpsProxy
         $PipIndexUrl = $versionConfig.PipIndexUrl
         $PipExtraIndexUrl = $versionConfig.PipExtraIndexUrl
         $PipTrustedHost = $versionConfig.PipTrustedHost
@@ -242,8 +230,6 @@ $arguments = @(
     '--build-arg', "BUILDER_CUDA_IMAGE=$builderCudaImage",
     '--build-arg', "FINAL_CUDA_IMAGE=$finalCudaImage",
     '--build-arg', "MINIFORGE_INSTALLER_URL=$MiniforgeInstallerUrl",
-    '--build-arg', "APT_HTTP_PROXY=$AptHttpProxy",
-    '--build-arg', "APT_HTTPS_PROXY=$AptHttpsProxy",
     '--build-arg', "PYTHON_VERSION=$PythonVersion",
     '--build-arg', "COMFYUI_REPO=$ComfyUIRepo",
     '--build-arg', "COMFYUI_REF=$ComfyUIRef",
@@ -325,12 +311,6 @@ try {
         Show-CacheState -Label 'BootstrapCache' -CacheDir $bootstrapCacheDir -CacheNewDir $bootstrapCacheNewDir -BaseDir $dockerDir
         Write-Host "[PluginLock] hash=$customNodesHash"
     }
-    if ($AptHttpProxy) {
-        Write-Host "[BuildProxy] APT_HTTP_PROXY=$AptHttpProxy"
-    }
-    if ($AptHttpsProxy) {
-        Write-Host "[BuildProxy] APT_HTTPS_PROXY=$AptHttpsProxy"
-    }
     if ($PipIndexUrl) {
         Write-Host "[BuildProxy] PIP_INDEX_URL=$PipIndexUrl"
     }
@@ -364,13 +344,6 @@ try {
 
     Remove-StaleBuildKitNewDirs -ParentDir $bootstrapCacheParentDir -ExcludePath $bootstrapCacheNewDir -BaseDir $dockerDir
     Remove-StaleBuildKitNewDirs -ParentDir $finalCacheParentDir -ExcludePath $finalCacheNewDir -BaseDir $dockerDir
-    if ($BuildStage -eq 'final') {
-        Remove-BuildKitSiblingCaches `
-            -ParentDir $finalCacheParentDir `
-            -CurrentDir $finalCacheDir `
-            -Patterns @($cacheKeySuffix, "$cacheKeySuffix-plugins*") `
-            -BaseDir $dockerDir
-    }
 
     Show-CacheState -Label 'AfterBuild' -CacheDir $cacheDir -CacheNewDir $cacheNewDir -BaseDir $dockerDir
     Show-CacheState -Label 'LegacyCache' -CacheDir $legacyCacheDir -CacheNewDir $legacyCacheNewDir -BaseDir $dockerDir

@@ -81,6 +81,26 @@ function Set-EnvValue {
     Set-Content -LiteralPath $Path -Value $newLines -Encoding utf8
 }
 
+function Remove-EnvValue {
+    param(
+        [string]$Path,
+        [string]$Name
+    )
+
+    if (-not (Test-Path $Path)) {
+        return
+    }
+
+    $lines = @(Get-Content -LiteralPath $Path)
+    $newLines = foreach ($line in $lines) {
+        if ($line -notmatch "^\s*$([regex]::Escape($Name))=") {
+            $line
+        }
+    }
+
+    Set-Content -LiteralPath $Path -Value $newLines -Encoding utf8
+}
+
 function Save-VersionConfig {
     param(
         [string]$Path,
@@ -94,8 +114,6 @@ function Save-VersionConfig {
         [string]$ComfyUIRef,
         [string]$NodeJsVersion,
         [string]$TorchVersion,
-        [string]$AptHttpProxy,
-        [string]$AptHttpsProxy,
         [string]$PipIndexUrl,
         [string]$PipExtraIndexUrl,
         [string]$PipTrustedHost,
@@ -112,12 +130,14 @@ function Save-VersionConfig {
     Set-EnvValue -Path $Path -Name 'COMFYUI_REF' -Value $ComfyUIRef
     Set-EnvValue -Path $Path -Name 'NODEJS_VERSION' -Value $NodeJsVersion
     Set-EnvValue -Path $Path -Name 'TORCH_VERSION' -Value $TorchVersion
-    Set-EnvValue -Path $Path -Name 'APT_HTTP_PROXY' -Value $AptHttpProxy
-    Set-EnvValue -Path $Path -Name 'APT_HTTPS_PROXY' -Value $AptHttpsProxy
     Set-EnvValue -Path $Path -Name 'PIP_INDEX_URL' -Value $PipIndexUrl
     Set-EnvValue -Path $Path -Name 'PIP_EXTRA_INDEX_URL' -Value $PipExtraIndexUrl
     Set-EnvValue -Path $Path -Name 'PIP_TRUSTED_HOST' -Value $PipTrustedHost
     Set-EnvValue -Path $Path -Name 'PYTORCH_INDEX_URL_OVERRIDE' -Value $PyTorchIndexUrlOverride
+    Remove-EnvValue -Path $Path -Name 'APT_HTTP_PROXY'
+    Remove-EnvValue -Path $Path -Name 'APT_HTTPS_PROXY'
+    Remove-EnvValue -Path $Path -Name 'APT_CACHE_PORT'
+    Remove-EnvValue -Path $Path -Name 'APT_CACHE_DATA_DIR'
 }
 
 function Get-VersionConfig {
@@ -137,8 +157,6 @@ function Get-VersionConfig {
         ComfyUIRef = Use-EnvValue -Values $Values -Name 'COMFYUI_REF' -CurrentValue $Defaults.ComfyUIRef
         NodeJsVersion = Use-EnvValue -Values $Values -Name 'NODEJS_VERSION' -CurrentValue $Defaults.NodeJsVersion
         TorchVersion = Use-EnvValue -Values $Values -Name 'TORCH_VERSION' -CurrentValue $Defaults.TorchVersion
-        AptHttpProxy = Use-EnvValue -Values $Values -Name 'APT_HTTP_PROXY' -CurrentValue $Defaults.AptHttpProxy
-        AptHttpsProxy = Use-EnvValue -Values $Values -Name 'APT_HTTPS_PROXY' -CurrentValue $Defaults.AptHttpsProxy
         PipIndexUrl = Use-EnvValue -Values $Values -Name 'PIP_INDEX_URL' -CurrentValue $Defaults.PipIndexUrl
         PipExtraIndexUrl = Use-EnvValue -Values $Values -Name 'PIP_EXTRA_INDEX_URL' -CurrentValue $Defaults.PipExtraIndexUrl
         PipTrustedHost = Use-EnvValue -Values $Values -Name 'PIP_TRUSTED_HOST' -CurrentValue $Defaults.PipTrustedHost
@@ -163,8 +181,6 @@ function Merge-BoundVersionConfig {
         ComfyUIRef = 'ComfyUIRef'
         NodeJsVersion = 'NodeJsVersion'
         TorchVersion = 'TorchVersion'
-        AptHttpProxy = 'AptHttpProxy'
-        AptHttpsProxy = 'AptHttpsProxy'
         PipIndexUrl = 'PipIndexUrl'
         PipExtraIndexUrl = 'PipExtraIndexUrl'
         PipTrustedHost = 'PipTrustedHost'

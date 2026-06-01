@@ -1,17 +1,4 @@
 services:
-  apt-cacher-ng:
-    build:
-      context: ..
-      dockerfile: docker/cache/apt-cacher-ng.Dockerfile
-    image: hegenai/cache-apt-cacher-ng:local
-    profiles:
-      - cache
-    ports:
-      - "${APT_CACHE_PORT:-3142}:3142"
-    volumes:
-      - ${APT_CACHE_DATA_DIR:-../storage/cache-services/apt-cacher-ng}:/var/cache/apt-cacher-ng
-    restart: unless-stopped
-
   devpi:
     build:
       context: ..

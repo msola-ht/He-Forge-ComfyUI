@@ -9,8 +9,6 @@ FROM ${BUILDER_CUDA_IMAGE} AS builder-bootstrap
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG APT_HTTP_PROXY=
-ARG APT_HTTPS_PROXY=
 ARG MINIFORGE_INSTALLER_URL=https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
 ARG PYTHON_VERSION=3.12
 ARG COMFYUI_REPO=https://github.com/Comfy-Org/ComfyUI.git
@@ -36,20 +34,9 @@ RUN --mount=type=cache,id=apt-cache-${APT_CACHE_KEY},target=/var/cache/apt,shari
     --mount=type=cache,id=apt-lists-${APT_CACHE_KEY},target=/var/lib/apt/lists,sharing=locked \
     packages=(bash ca-certificates curl ffmpeg git git-lfs libgl1 libglib2.0-0 libsm6 libxext6 tini unzip) \
     && rm -f /etc/apt/apt.conf.d/docker-clean \
-    && rm -f /etc/apt/apt.conf.d/99local-proxy \
-    && if [[ -n "${APT_HTTP_PROXY}" ]]; then printf 'Acquire::http::Proxy "%s";\n' "${APT_HTTP_PROXY}" >> /etc/apt/apt.conf.d/99local-proxy; fi \
-    && if [[ -n "${APT_HTTPS_PROXY}" ]]; then \
-        printf 'Acquire::https::Proxy "%s";\n' "${APT_HTTPS_PROXY}" >> /etc/apt/apt.conf.d/99local-proxy; \
-    else \
-        printf 'Acquire::https::Proxy "DIRECT";\nAcquire::https::Proxy::developer.download.nvidia.com "DIRECT";\n' >> /etc/apt/apt.conf.d/99local-proxy; \
-    fi \
     && printf 'Binary::apt::APT::Keep-Downloaded-Packages "true";\n' > /etc/apt/apt.conf.d/keep-cache \
-    && if ! (apt-get update && apt-get install -y --no-install-recommends "${packages[@]}"); then \
-        echo "APT proxy path failed, retrying direct." >&2; \
-        rm -f /etc/apt/apt.conf.d/99local-proxy; \
-        apt-get update; \
-        apt-get install -y --no-install-recommends "${packages[@]}"; \
-    fi
+    && apt-get update \
+    && apt-get install -y --no-install-recommends "${packages[@]}"
 
 RUN curl -fsSL -o /tmp/miniforge.sh "${MINIFORGE_INSTALLER_URL}" \
     && bash /tmp/miniforge.sh -b -p "${CONDA_DIR}" \
@@ -140,8 +127,6 @@ FROM ${FINAL_CUDA_IMAGE} AS bootstrap
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG APT_HTTP_PROXY=
-ARG APT_HTTPS_PROXY=
 ARG UBUNTU_VERSION=22.04
 ARG UBUNTU_CACHE_KEY=ubuntu2204
 ARG APT_CACHE_KEY=cuda12.8.2-ubuntu2204
@@ -160,20 +145,9 @@ RUN --mount=type=cache,id=apt-cache-${APT_CACHE_KEY},target=/var/cache/apt,shari
     --mount=type=cache,id=apt-lists-${APT_CACHE_KEY},target=/var/lib/apt/lists,sharing=locked \
     packages=(bash ca-certificates curl ffmpeg git git-lfs libgl1 libglib2.0-0 libsm6 libxext6 tini unzip) \
     && rm -f /etc/apt/apt.conf.d/docker-clean \
-    && rm -f /etc/apt/apt.conf.d/99local-proxy \
-    && if [[ -n "${APT_HTTP_PROXY}" ]]; then printf 'Acquire::http::Proxy "%s";\n' "${APT_HTTP_PROXY}" >> /etc/apt/apt.conf.d/99local-proxy; fi \
-    && if [[ -n "${APT_HTTPS_PROXY}" ]]; then \
-        printf 'Acquire::https::Proxy "%s";\n' "${APT_HTTPS_PROXY}" >> /etc/apt/apt.conf.d/99local-proxy; \
-    else \
-        printf 'Acquire::https::Proxy "DIRECT";\nAcquire::https::Proxy::developer.download.nvidia.com "DIRECT";\n' >> /etc/apt/apt.conf.d/99local-proxy; \
-    fi \
     && printf 'Binary::apt::APT::Keep-Downloaded-Packages "true";\n' > /etc/apt/apt.conf.d/keep-cache \
-    && if ! (apt-get update && apt-get install -y --no-install-recommends "${packages[@]}"); then \
-        echo "APT proxy path failed, retrying direct." >&2; \
-        rm -f /etc/apt/apt.conf.d/99local-proxy; \
-        apt-get update; \
-        apt-get install -y --no-install-recommends "${packages[@]}"; \
-    fi
+    && apt-get update \
+    && apt-get install -y --no-install-recommends "${packages[@]}"
 
 COPY --from=builder-bootstrap /root/miniforge /root/miniforge
 COPY --from=builder-bootstrap /root/ComfyUI-src /root/ComfyUI-seed

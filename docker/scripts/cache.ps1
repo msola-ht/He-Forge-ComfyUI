@@ -88,7 +88,8 @@ function Remove-StaleBuildKitNewDirs {
     param(
         [string]$ParentDir,
         [string]$ExcludePath = '',
-        [string]$BaseDir = ''
+        [string]$BaseDir = '',
+        [timespan]$MinAge = ([TimeSpan]::FromHours(24))
     )
 
     if (-not (Test-Path $ParentDir)) {
@@ -100,11 +101,14 @@ function Remove-StaleBuildKitNewDirs {
         $excludedFullPath = [System.IO.Path]::GetFullPath($ExcludePath)
     }
 
+    $staleBeforeUtc = [DateTime]::UtcNow.Subtract($MinAge)
+
     $staleDirs = Get-ChildItem -LiteralPath $ParentDir -Directory -ErrorAction SilentlyContinue | Where-Object {
         $_.Name -like '*-new' -and (
             -not $excludedFullPath -or
             [System.IO.Path]::GetFullPath($_.FullName) -cne $excludedFullPath
-        )
+        ) -and
+        $_.LastWriteTimeUtc -le $staleBeforeUtc
     }
 
     foreach ($staleDir in $staleDirs) {
