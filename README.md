@@ -491,6 +491,24 @@ bash docker/compose.sh up comfyui-devel
 
 这个入口只负责调用 PowerShell 脚本。如果 `comfyui-runtime` 还没启动，它会先自动后台启动并等待容器进入 `running`，然后再进入交互 shell；如果已经在运行，就会直接进入容器交互 shell。这样适合手动 `pip install`、调试插件报错和验证修复结果，而不需要每改一次就重新构建镜像。
 
+默认会落在：
+
+```text
+/root/ComfyUI
+```
+
+如果你希望进去就落在插件目录，可以使用：
+
+```powershell
+.\进入-ComfyUI-插件目录.bat
+```
+
+对应目录是：
+
+```text
+/root/ComfyUI/custom_nodes
+```
+
 注意：在 `PowerShell` 里直接写 `.\docker\compose.ps1 up -d comfyui-runtime` 时，`-d` 可能会被 `PowerShell` 当成脚本自己的公共参数 `-Debug`，不会继续传给 `docker compose`，结果就会变成前台附着日志模式。这里建议改用带引号的 `"--detach"`。
 
 如果你已经在容器里手动补过依赖，想把当前状态导出来做留档或后续回填构建，可以直接运行：

@@ -1,6 +1,7 @@
 param(
     [string]$Service = 'comfyui-runtime',
-    [int]$WaitTimeoutSeconds = 30
+    [int]$WaitTimeoutSeconds = 30,
+    [string]$ShellWorkDir = '/root/ComfyUI'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -111,5 +112,5 @@ if (-not $containerId) {
     exit 1
 }
 
-& docker exec -it $containerId bash -i
+& docker exec -it $containerId bash -lc "cd '$ShellWorkDir' && exec bash -i"
 exit $LASTEXITCODE
