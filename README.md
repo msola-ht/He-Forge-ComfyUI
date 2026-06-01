@@ -1,6 +1,6 @@
 # He-Forge-ComfyUI Docker 构建
 
-这个仓库用于构建内置 `ComfyUI`、`Miniforge` 和 `Python 3.12` 的 Docker 镜像，并支持在 Windows 下使用 `BuildKit` 本地缓存来复用 `apt`、`pip`、`conda` 下载内容。
+这个仓库用于构建内置 `ComfyUI`、`Miniforge` 和 `Python 3.12` 的 Docker 镜像，并支持在 Windows 下使用 `BuildKit` 本地缓存来复用 `apt`、`pip`、`conda` 下载内容。当前同时补充了 `bash` 入口，后续在 Linux / macOS 下也可以直接复用同一套版本推导与缓存布局。
 
 ## 内置内容
 
@@ -93,8 +93,10 @@ Docker 相关文件已经集中到 `docker/` 目录，推荐结构如下：
 
 - `docker/Dockerfile`
 - `docker/build.ps1`
+- `docker/build.sh`
 - `docker/configure.ps1`
 - `docker/compose.ps1`
+- `docker/compose.sh`
 - `docker/docker-compose.yml`
 - `docker/.env.example`
 - `docker/scripts/env.ps1`
@@ -102,6 +104,8 @@ Docker 相关文件已经集中到 `docker/` 目录，推荐结构如下：
 - `docker/scripts/prompt.ps1`
 - `docker/scripts/cache.ps1`
 - `docker/scripts/test.ps1`
+- `docker/scripts/test.sh`
+- `docker/scripts/resolve-docker-config.py`
 - `docker/scripts/entrypoint.sh`
 - `docker/scripts/install-plugins.py`
 - `docker/scripts/resolve-plugin-lock.py`
@@ -153,8 +157,15 @@ Docker 相关文件已经集中到 `docker/` 目录，推荐结构如下：
 .\构建-ComfyUI.bat
 ```
 
+如果当前不是 Windows，而是 Linux / macOS，使用：
+
+```bash
+bash docker/build.sh
+```
+
 `build.ps1` 会读取当前 `docker/.env`，先询问是否修改版本配置；如果修改，会保存回 `docker/.env`，然后继续询问这次要跑 `bootstrap` 还是 `final`，最后直接开始构建。
 在交互模式下，脚本还会继续询问“构建完成后是否运行镜像自检”，默认会直接执行自检。
+`build.sh` 则是非交互入口：它会读取 `docker/.env`，并接受命令行参数覆盖部分版本配置；如果你在 Linux / macOS 下需要改默认值，优先直接编辑 `docker/.env`。
 
 如果你想临时覆盖 `.env` 中的部分版本配置，也可以通过参数构建：
 
@@ -166,6 +177,10 @@ Docker 相关文件已经集中到 `docker/` 目录，推荐结构如下：
 
 ```powershell
 .\docker\build.ps1 -FromEnv -BuildStage bootstrap
+```
+
+```bash
+bash docker/build.sh --build-stage bootstrap
 ```
 
 `bootstrap` 会完成：
@@ -182,15 +197,24 @@ Docker 相关文件已经集中到 `docker/` 目录，推荐结构如下：
 .\docker\build.ps1 -FromEnv -BuildStage final
 ```
 
+```bash
+bash docker/build.sh --build-stage final
+```
+
 如果你希望跳过交互、并在构建成功后自动输出镜像自检结果，可以加 `-TestAfterBuild`：
 
 ```powershell
 .\docker\build.ps1 -FromEnv -BuildStage final -TestAfterBuild
 ```
 
+```bash
+bash docker/build.sh --build-stage final --test-after-build
+```
+
 `bootstrap` 阶段会测试 `Python`、`Node.js`、`npm`、`uv`、`ComfyUI seed` 和 `Miniforge` 路径。
 `final` 阶段会额外测试 `PyTorch`、`torchvision`、`torchaudio`、`xformers`、CUDA 可用性、GPU 名称和 `ComfyUI` Python 导入。
 如果当前镜像内置了 custom nodes，自检也会检查 `ComfyUI Manager` 和 `ComfyUI DD Translation` 是否存在于 `/root/ComfyUI/custom_nodes`。
+如果当前是 macOS 或其他不支持 `docker run --gpus all` 的环境，建议不要开启 `--test-after-build`；Bash 构建入口本身可以继续使用，但 `final` 阶段的 GPU 自检需要在支持 NVIDIA GPU 透传的环境里执行。
 
 镜像 tag 会随关键版本自动变化，规则为：
 
@@ -301,7 +325,7 @@ PYTORCH_INDEX_URL_OVERRIDE=http://host.docker.internal:3143/whl/{profile}
 - `cu128 -> http://host.docker.internal:3143/whl/cu128`
 - `cu126 -> http://host.docker.internal:3143/whl/cu126`
 
-这样后续 `build.ps1` 再执行 `apt-get update`、`pip install`、`pip install torch... --index-url ...` 时，会优先打到你本机这些缓存容器，而不是每次都直接出公网。
+这样后续 `build.ps1` 再执行 `pip install`、`pip install torch... --index-url ...` 时，会优先打到你本机这些缓存容器，而不是每次都直接出公网。
 
 ## 运行方式
 
@@ -384,10 +408,18 @@ DEVEL_PIP_CACHE_DIR=../storage/devel/cache/pip
 .\docker\compose.ps1 up comfyui-runtime
 ```
 
+```bash
+bash docker/compose.sh up comfyui-runtime
+```
+
 启动 `devel`：
 
 ```powershell
 .\docker\compose.ps1 up comfyui-devel
+```
+
+```bash
+bash docker/compose.sh up comfyui-devel
 ```
 
 默认端口：
@@ -444,9 +476,10 @@ DEVEL_PIP_CACHE_DIR=../storage/devel/cache/pip
 版本配置入口为 `docker/configure.ps1`，它只负责交互式写入 `docker/.env`，直接回车会保留当前值，包括 `PIP_INDEX_URL`、`PIP_EXTRA_INDEX_URL`、`PIP_TRUSTED_HOST` 和 `PYTORCH_INDEX_URL_OVERRIDE` 这类镜像源配置。
 构建逻辑统一由 `docker/build.ps1` 负责；根目录 `.\构建-ComfyUI.bat` 只是薄包装调用。直接运行 `.\docker\build.ps1` 或 `.\构建-ComfyUI.bat` 都会先确认版本配置，再选择构建阶段并开始构建。
 如果要跳过所有交互并使用 `docker/.env`，使用 `.\docker\build.ps1 -FromEnv -BuildStage final`、`.\docker\build.ps1 -FromEnv -BuildStage bootstrap`，或者等价地通过 `.\构建-ComfyUI.bat -FromEnv -BuildStage final` 调用。
+如果当前是 Linux / macOS，直接使用 `bash docker/build.sh`；这个入口不做交互式提问，默认读取 `docker/.env`，需要调整配置时直接编辑 `.env` 或通过 `--torch-version`、`--pytorch-cuda-profile`、`--build-stage`、`--variant` 这类参数覆盖。macOS 下可以使用这个入口完成构建，但 `final` 阶段的 GPU 自检仍然需要支持 NVIDIA GPU 透传的环境。
 
-`docker compose` 推荐通过 `docker/compose.ps1` 间接调用，主要负责启动、停止、查看日志等运行期操作。
-`compose.ps1` 会读取 `docker/.env`，并根据 `CUDA_IMAGE_VERSION` 和 `UBUNTU_VERSION` 推导实际 CUDA 镜像标签。
+`docker compose` 推荐通过 `docker/compose.ps1` 或 `docker/compose.sh` 间接调用，主要负责启动、停止、查看日志等运行期操作。
+`compose.ps1` / `compose.sh` 都会读取 `docker/.env`，并根据 `CUDA_IMAGE_VERSION` 和 `UBUNTU_VERSION` 推导实际 CUDA 镜像标签。
 同时也会根据 `CUDA_IMAGE_VERSION`、`PYTORCH_CUDA_PROFILE`、`UBUNTU_VERSION`、`TORCH_VERSION` 推导运行镜像 tag，确保 `compose` 启动的是当前版本组合对应的镜像。
 其中 `docker/.env` 里只保留真正会被运行入口读取的变量；像 `COMFYUI_SEED_DIR`、`MINIFORGE_DIR`、`FNM_DIR` 这类镜像内部固定路径不再放进 `.env`，避免误导。
 
@@ -532,6 +565,7 @@ storage/devel/exports/<时间戳>/
 - `xformers` 会从同一份版本矩阵解析；如果当前 `TorchVersion + PYTORCH_CUDA_PROFILE` 没有匹配 wheel，则不会强行安装，避免 pip 改写 PyTorch 版本
 - 构建逻辑统一收口到 `.\docker\build.ps1`；如果你更习惯双击或从根目录调用，也可以使用只做转发的 `.\构建-ComfyUI.bat`
 - 缓存容器提供了根目录入口 `.\启动-缓存容器.bat`；它会先按 `DEVPI_PORT`、`PYTORCH_PROXY_PORT` 自动写入缓存代理配置到 `docker/.env`，再启动 `devpi`、`pytorch-proxy`
+- 非 Windows 环境可以使用 `bash docker/build.sh` 和 `bash docker/compose.sh` 复用同一套版本解析与缓存目录规则
 - `BuildStage=bootstrap` 只预热系统、Python、ComfyUI 源码、Node 和 uv；`BuildStage=final` 才安装 PyTorch 和 ComfyUI 依赖
 - 当前默认安装命令等价于 `pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 xformers==0.0.30 --index-url <随 PyTorchCudaProfile 自动匹配>`
 - 当前内置匹配来自 `docker/data/pytorch-tags.json`，默认包含官方页面解析到的 `torch/torchvision/torchaudio/xformers` 对应关系
@@ -539,7 +573,7 @@ storage/devel/exports/<时间戳>/
 - 如果你要更换 PyTorch CUDA wheel 源，直接传 `-PyTorchCudaProfile`
 - 如果你要更换 Node.js 主版本，直接传 `-NodeJsVersion`
 - 如果你要更换版本，直接在构建时传 `-TorchVersion`
-- 如果你使用 `docker compose`，推荐通过 `.\docker\compose.ps1` 调用；它只负责运行期操作，构建仍然使用 `.\docker\build.ps1`
+- 如果你使用 `docker compose`，推荐通过 `.\docker\compose.ps1` 或 `bash docker/compose.sh` 调用；它只负责运行期操作，构建仍然使用各自的 `build` 入口
 - 如果你希望构建可复现，建议把 `ComfyUIRef` 固定为具体 tag 或 commit
 - 如果你希望插件构建完全可复现，建议把 `docker/plugins/custom-nodes.json` 中每个插件的 `ref` 固定为 tag 或 commit
 - 当前只保留 `runtime` 和 `devel` 两种最终镜像

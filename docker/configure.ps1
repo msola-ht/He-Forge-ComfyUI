@@ -22,8 +22,6 @@ $defaults = @{
     ComfyUIRef = 'master'
     NodeJsVersion = '22'
     TorchVersion = '2.7.0'
-    AptHttpProxy = ''
-    AptHttpsProxy = ''
     PipIndexUrl = ''
     PipExtraIndexUrl = ''
     PipTrustedHost = ''
@@ -50,8 +48,6 @@ Save-VersionConfig `
     -ComfyUIRef $versionConfig.ComfyUIRef `
     -NodeJsVersion $versionConfig.NodeJsVersion `
     -TorchVersion $versionConfig.TorchVersion `
-    -AptHttpProxy $versionConfig.AptHttpProxy `
-    -AptHttpsProxy $versionConfig.AptHttpsProxy `
     -PipIndexUrl $versionConfig.PipIndexUrl `
     -PipExtraIndexUrl $versionConfig.PipExtraIndexUrl `
     -PipTrustedHost $versionConfig.PipTrustedHost `
