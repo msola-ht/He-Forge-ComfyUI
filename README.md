@@ -441,7 +441,7 @@ DEVEL_PIP_CACHE_DIR=../storage/devel/cache/pip
 - `-FromEnv`
 - `-TestAfterBuild`
 
-版本配置入口为 `docker/configure.ps1`，它只负责交互式写入 `docker/.env`。
+版本配置入口为 `docker/configure.ps1`，它只负责交互式写入 `docker/.env`，直接回车会保留当前值，包括 `PIP_INDEX_URL`、`PIP_EXTRA_INDEX_URL`、`PIP_TRUSTED_HOST` 和 `PYTORCH_INDEX_URL_OVERRIDE` 这类镜像源配置。
 构建逻辑统一由 `docker/build.ps1` 负责；根目录 `.\构建-ComfyUI.bat` 只是薄包装调用。直接运行 `.\docker\build.ps1` 或 `.\构建-ComfyUI.bat` 都会先确认版本配置，再选择构建阶段并开始构建。
 如果要跳过所有交互并使用 `docker/.env`，使用 `.\docker\build.ps1 -FromEnv -BuildStage final`、`.\docker\build.ps1 -FromEnv -BuildStage bootstrap`，或者等价地通过 `.\构建-ComfyUI.bat -FromEnv -BuildStage final` 调用。
 
@@ -460,27 +460,41 @@ DEVEL_PIP_CACHE_DIR=../storage/devel/cache/pip
 
 注意：在 `PowerShell` 里直接写 `.\docker\compose.ps1 up -d comfyui-runtime` 时，`-d` 可能会被 `PowerShell` 当成脚本自己的公共参数 `-Debug`，不会继续传给 `docker compose`，结果就会变成前台附着日志模式。这里建议改用带引号的 `"--detach"`。
 
-如果你已经在 `runtime` 容器里手动补过依赖，想把当前状态导出来做留档或后续回填构建，可以直接运行：
+如果你已经在容器里手动补过依赖，想把当前状态导出来做留档或后续回填构建，可以直接运行：
 
 ```powershell
 .\导出-ComfyUI-运行时状态.bat
 ```
 
-默认会导出到：
+默认导出 `comfyui-runtime`，并写入：
 
 ```text
 storage/runtime/exports/<时间戳>/
+```
+
+如果要导出 `comfyui-devel`，可以直接执行：
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\docker\export-runtime-state.ps1 -Service comfyui-devel
+```
+
+这时默认会写入：
+
+```text
+storage/devel/exports/<时间戳>/
 ```
 
 其中会包含：
 
 - `pip-freeze.txt`
 - `pip-list.json`
+- `pip-list.stderr.txt`（仅当 JSON 导出命令有告警或错误输出时生成）
 - `pip-check.txt`
 - `python-env.json`
+- `python-env.stderr.txt`（仅当 JSON 导出命令有告警或错误输出时生成）
 - `custom-nodes.json`
 
-这套导出主要用于记录“当前容器里到底补了什么”，方便后续把有效修复再正式固化进构建流程。
+这套导出主要用于记录“当前容器里到底补了什么”，方便后续把有效修复再正式固化进构建流程。`pip-list.json` 和 `python-env.json` 现在只保留干净 JSON；如果对应命令有额外告警，会单独落到 `*.stderr.txt`，避免污染 JSON 文件本身。
 
 例如：
 

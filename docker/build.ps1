@@ -323,6 +323,12 @@ try {
 
     $pullImages = @($builderCudaImage, $finalCudaImage, $uvImage) | Select-Object -Unique
     foreach ($image in $pullImages) {
+        & docker image inspect $image 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[BuildImage] 已存在本地镜像，跳过预拉取：$image"
+            continue
+        }
+
         & docker pull $image
         if ($LASTEXITCODE -ne 0) {
             throw "docker pull 失败：$image，退出码：$LASTEXITCODE"

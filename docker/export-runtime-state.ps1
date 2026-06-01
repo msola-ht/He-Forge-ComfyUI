@@ -1,4 +1,5 @@
 param(
+    [ValidateSet('comfyui-runtime', 'comfyui-devel')]
     [string]$Service = 'comfyui-runtime',
     [string]$OutputDir = ''
 )
@@ -36,16 +37,98 @@ function Invoke-ComposeCapture {
         [string[]]$ComposeBaseArgs,
         [string[]]$CommandArgs,
         [string]$OutputFile,
+        [string]$ErrorFile = '',
+        [switch]$ExpectJson,
         [switch]$AllowFailure
     )
 
-    $result = & docker @ComposeBaseArgs @CommandArgs 2>&1
-    $exitCode = $LASTEXITCODE
+    $stdoutFile = [System.IO.Path]::GetTempFileName()
+    $stderrFile = [System.IO.Path]::GetTempFileName()
 
-    @($result) | Set-Content -LiteralPath $OutputFile -Encoding utf8
+    try {
+        & docker @ComposeBaseArgs @CommandArgs 1> $stdoutFile 2> $stderrFile
+        $exitCode = $LASTEXITCODE
 
-    if ($exitCode -ne 0 -and -not $AllowFailure) {
-        throw "导出命令执行失败：docker $($ComposeBaseArgs -join ' ') $($CommandArgs -join ' ')"
+        $stdoutText = if (Test-Path -LiteralPath $stdoutFile) {
+            Get-Content -LiteralPath $stdoutFile -Raw
+        } else {
+            ''
+        }
+        $stderrText = if (Test-Path -LiteralPath $stderrFile) {
+            Get-Content -LiteralPath $stderrFile -Raw
+        } else {
+            ''
+        }
+
+        if ($ExpectJson) {
+            if ([string]::IsNullOrWhiteSpace($stdoutText)) {
+                throw "导出命令未生成 JSON 输出：docker $($ComposeBaseArgs -join ' ') $($CommandArgs -join ' ')"
+            }
+
+            try {
+                $null = $stdoutText | ConvertFrom-Json
+            }
+            catch {
+                throw "导出命令生成了无效 JSON：docker $($ComposeBaseArgs -join ' ') $($CommandArgs -join ' ')"
+            }
+        }
+
+        if ($ErrorFile) {
+            Set-Content -LiteralPath $OutputFile -Value $stdoutText -Encoding utf8
+            if ([string]::IsNullOrWhiteSpace($stderrText)) {
+                if (Test-Path -LiteralPath $ErrorFile) {
+                    Remove-Item -LiteralPath $ErrorFile -Force
+                }
+            } else {
+                Set-Content -LiteralPath $ErrorFile -Value $stderrText -Encoding utf8
+            }
+        } else {
+            $combinedOutput = @()
+            if (-not [string]::IsNullOrWhiteSpace($stdoutText)) {
+                $combinedOutput += $stdoutText.TrimEnd("`r", "`n")
+            }
+            if (-not [string]::IsNullOrWhiteSpace($stderrText)) {
+                $combinedOutput += $stderrText.TrimEnd("`r", "`n")
+            }
+
+            Set-Content -LiteralPath $OutputFile -Value $combinedOutput -Encoding utf8
+        }
+
+        if ($exitCode -ne 0 -and -not $AllowFailure) {
+            throw "导出命令执行失败：docker $($ComposeBaseArgs -join ' ') $($CommandArgs -join ' ')"
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $stdoutFile, $stderrFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-ServiceExportConfig {
+    param(
+        [string]$TargetService,
+        [hashtable]$EnvValues,
+        [string]$DockerDir,
+        [string]$RootDir
+    )
+
+    switch ($TargetService) {
+        'comfyui-runtime' {
+            $comfyuiDirValue = Use-EnvValue -Values $EnvValues -Name 'RUNTIME_COMFYUI_DIR' -CurrentValue '../storage/runtime/ComfyUI'
+            return @{
+                ComfyUIHostDir = Resolve-ExportPath -BasePath $DockerDir -PathValue $comfyuiDirValue
+                DefaultExportDir = Join-Path $RootDir 'storage/runtime/exports'
+            }
+        }
+        'comfyui-devel' {
+            $comfyuiDirValue = Use-EnvValue -Values $EnvValues -Name 'DEVEL_COMFYUI_DIR' -CurrentValue '../storage/devel/ComfyUI'
+            return @{
+                ComfyUIHostDir = Resolve-ExportPath -BasePath $DockerDir -PathValue $comfyuiDirValue
+                DefaultExportDir = Join-Path $RootDir 'storage/devel/exports'
+            }
+        }
+        default {
+            throw "不支持的服务：$TargetService"
+        }
     }
 }
 
@@ -111,14 +194,14 @@ function Get-CustomNodeSnapshot {
 Ensure-EnvFile -EnvFile $envFile -EnvExampleFile $envExampleFile
 $envValues = Read-EnvFile -Path $envFile
 
-$runtimeComfyuiDirValue = Use-EnvValue -Values $envValues -Name 'RUNTIME_COMFYUI_DIR' -CurrentValue '../storage/runtime/ComfyUI'
-$runtimeComfyuiDir = Resolve-ExportPath -BasePath $dockerDir -PathValue $runtimeComfyuiDirValue
-$customNodesDir = Join-Path $runtimeComfyuiDir 'custom_nodes'
+$serviceExportConfig = Get-ServiceExportConfig -TargetService $Service -EnvValues $envValues -DockerDir $dockerDir -RootDir $root
+$comfyuiHostDir = $serviceExportConfig.ComfyUIHostDir
+$customNodesDir = Join-Path $comfyuiHostDir 'custom_nodes'
 
 $resolvedOutputBase = if ($OutputDir) {
     Resolve-ExportPath -BasePath $root -PathValue $OutputDir
 } else {
-    Join-Path $root 'storage/runtime/exports'
+    $serviceExportConfig.DefaultExportDir
 }
 
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -138,7 +221,7 @@ if ($LASTEXITCODE -ne 0 -or $runningServices -notcontains $Service) {
 
 Invoke-ComposeCapture -ComposeBaseArgs $composeBaseArgs -CommandArgs @('exec', '--no-TTY', $Service, 'python', '--version') -OutputFile (Join-Path $exportDir 'python-version.txt')
 Invoke-ComposeCapture -ComposeBaseArgs $composeBaseArgs -CommandArgs @('exec', '--no-TTY', $Service, 'python', '-m', 'pip', 'freeze') -OutputFile (Join-Path $exportDir 'pip-freeze.txt')
-Invoke-ComposeCapture -ComposeBaseArgs $composeBaseArgs -CommandArgs @('exec', '--no-TTY', $Service, 'python', '-m', 'pip', 'list', '--format=json') -OutputFile (Join-Path $exportDir 'pip-list.json')
+Invoke-ComposeCapture -ComposeBaseArgs $composeBaseArgs -CommandArgs @('exec', '--no-TTY', $Service, 'python', '-m', 'pip', 'list', '--format=json') -OutputFile (Join-Path $exportDir 'pip-list.json') -ErrorFile (Join-Path $exportDir 'pip-list.stderr.txt') -ExpectJson
 Invoke-ComposeCapture -ComposeBaseArgs $composeBaseArgs -CommandArgs @('exec', '--no-TTY', $Service, 'python', '-m', 'pip', 'cache', 'dir') -OutputFile (Join-Path $exportDir 'pip-cache-dir.txt')
 Invoke-ComposeCapture -ComposeBaseArgs $composeBaseArgs -CommandArgs @('exec', '--no-TTY', $Service, 'python', '-m', 'pip', 'check') -OutputFile (Join-Path $exportDir 'pip-check.txt') -AllowFailure
 Invoke-ComposeCapture -ComposeBaseArgs $composeBaseArgs -CommandArgs @(
@@ -148,7 +231,7 @@ Invoke-ComposeCapture -ComposeBaseArgs $composeBaseArgs -CommandArgs @(
     'python',
     '-c',
     'import json,site,sys; print(json.dumps({"executable": sys.executable, "prefix": sys.prefix, "site_packages": site.getsitepackages(), "sys_path": sys.path}, ensure_ascii=True, indent=2))'
-) -OutputFile (Join-Path $exportDir 'python-env.json')
+) -OutputFile (Join-Path $exportDir 'python-env.json') -ErrorFile (Join-Path $exportDir 'python-env.stderr.txt') -ExpectJson
 
 $customNodeSnapshot = Get-CustomNodeSnapshot -CustomNodesDir $customNodesDir
 $customNodeSnapshot | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $exportDir 'custom-nodes.json') -Encoding utf8
@@ -159,7 +242,7 @@ $summaryLines = @(
     "- 导出时间: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
     "- 服务名: $Service",
     "- 导出目录: $exportDir",
-    "- Runtime ComfyUI 目录: $runtimeComfyuiDir",
+    "- ComfyUI 目录: $comfyuiHostDir",
     "- Custom Nodes 目录: $customNodesDir",
     "",
     "## 文件说明",
@@ -171,6 +254,7 @@ $summaryLines = @(
     "- `pip-check.txt`: 当前依赖冲突检查结果",
     "- `pip-cache-dir.txt`: 容器内 pip 缓存目录",
     "- `custom-nodes.json`: 当前 custom nodes 目录及 Git 快照",
+    "- `pip-list.stderr.txt` / `python-env.stderr.txt`: 对应 JSON 导出命令的告警或错误输出，仅在存在时生成",
     "",
     "## 说明",
     "",

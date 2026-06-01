@@ -22,6 +22,12 @@ $defaults = @{
     ComfyUIRef = 'master'
     NodeJsVersion = '22'
     TorchVersion = '2.7.0'
+    AptHttpProxy = ''
+    AptHttpsProxy = ''
+    PipIndexUrl = ''
+    PipExtraIndexUrl = ''
+    PipTrustedHost = ''
+    PyTorchIndexUrlOverride = ''
 }
 
 $versionConfig = Get-VersionConfig -Values (Read-EnvFile -Path $envFile) -Defaults $defaults
@@ -43,7 +49,13 @@ Save-VersionConfig `
     -ComfyUIRepo $versionConfig.ComfyUIRepo `
     -ComfyUIRef $versionConfig.ComfyUIRef `
     -NodeJsVersion $versionConfig.NodeJsVersion `
-    -TorchVersion $versionConfig.TorchVersion
+    -TorchVersion $versionConfig.TorchVersion `
+    -AptHttpProxy $versionConfig.AptHttpProxy `
+    -AptHttpsProxy $versionConfig.AptHttpsProxy `
+    -PipIndexUrl $versionConfig.PipIndexUrl `
+    -PipExtraIndexUrl $versionConfig.PipExtraIndexUrl `
+    -PipTrustedHost $versionConfig.PipTrustedHost `
+    -PyTorchIndexUrlOverride $versionConfig.PyTorchIndexUrlOverride
 
 Write-Host ""
 Write-Host "已保存版本配置到 docker/.env"
