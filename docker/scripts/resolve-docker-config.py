@@ -2,6 +2,7 @@ import argparse
 import base64
 import hashlib
 import json
+import re
 import shlex
 import subprocess
 from pathlib import Path
@@ -229,6 +230,51 @@ def resolve_plugin_lock(manifest_path: Path, script_path: Path) -> str:
     return result.stdout.strip()
 
 
+def resolve_git_remote_commit(repo: str, ref: str) -> str:
+    normalized_ref = ref.strip()
+    if not normalized_ref:
+        raise RuntimeError("ComfyUIRef 不能为空。")
+
+    if re.fullmatch(r"[0-9a-fA-F]{40}", normalized_ref):
+        return normalized_ref.lower()
+
+    if normalized_ref.startswith("refs/"):
+        patterns = [f"{normalized_ref}^{{}}", normalized_ref]
+    else:
+        patterns = [
+            f"refs/tags/{normalized_ref}^{{}}",
+            f"refs/tags/{normalized_ref}",
+            f"refs/heads/{normalized_ref}",
+            normalized_ref,
+        ]
+
+    result = subprocess.run(
+        ["git", "ls-remote", repo, *patterns],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        message = result.stderr.strip() or result.stdout.strip() or "未知错误"
+        raise RuntimeError(f"解析远端引用失败：{message}")
+
+    resolved_by_name: dict[str, str] = {}
+    for raw_line in result.stdout.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        resolved_by_name[parts[1]] = parts[0].lower()
+
+    for pattern in patterns:
+        if pattern in resolved_by_name:
+            return resolved_by_name[pattern]
+
+    raise RuntimeError(f"未找到远端引用：{normalized_ref}")
+
+
 def to_shell_lines(values: dict[str, str]) -> str:
     lines = []
     for key in sorted(values.keys()):
@@ -405,6 +451,7 @@ def main() -> None:
             plugin_lock_json = resolve_plugin_lock(manifest_path, root_dir / "scripts/resolve-plugin-lock.py")
         plugin_hash = hashlib.sha256(plugin_lock_json.encode("utf-8")).hexdigest()[:12].lower()
         plugin_lock_b64 = base64.b64encode(plugin_lock_json.encode("utf-8")).decode("ascii")
+        comfyui_resolved_commit = resolve_git_remote_commit(config["ComfyUIRepo"], config["ComfyUIRef"])
         values.update(
             {
                 "TAG_SUFFIX": tag_suffix,
@@ -412,6 +459,7 @@ def main() -> None:
                 "CACHE_KEY_SUFFIX": cache_key_suffix,
                 "CUSTOM_NODES_HASH": plugin_hash,
                 "CUSTOM_NODES_LOCK_B64": plugin_lock_b64,
+                "COMFYUI_RESOLVED_COMMIT": comfyui_resolved_commit,
                 "FINAL_CACHE_KEY_SUFFIX": f"{cache_key_suffix}-plugins{plugin_hash}",
             }
         )

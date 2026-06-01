@@ -79,7 +79,8 @@ $defaults = @{
     PyTorchIndexUrlOverride = $PyTorchIndexUrlOverride
 }
 
-$versionConfig = Get-VersionConfig -Values (Read-EnvFile -Path $envFile) -Defaults $defaults
+$envValues = Read-EnvFile -Path $envFile
+$versionConfig = Get-VersionConfig -Values $envValues -Defaults $defaults
 $versionConfig = Merge-BoundVersionConfig -Config $versionConfig -BoundParameters $PSBoundParameters
 
 $ImageName = $versionConfig.ImageName
@@ -193,6 +194,14 @@ if ($BuildStage -eq 'final') {
 $customNodesHashBytes = [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($pluginLockJson))
 $customNodesHash = ([System.BitConverter]::ToString($customNodesHashBytes)).Replace('-', '').Substring(0, 12).ToLowerInvariant()
 $customNodesLockB64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($pluginLockJson))
+$comfyUIResolvedCommit = ''
+
+try {
+    $comfyUIResolvedCommit = Resolve-RemoteGitCommit -Repo $ComfyUIRepo -Ref $ComfyUIRef
+}
+catch {
+    throw "解析 ComfyUI 引用失败。请检查网络连通性、git 可用性和 COMFYUI_REPO / COMFYUI_REF 配置。详细信息：$($_.Exception.Message)"
+}
 
 if ($Push -and $TestAfterBuild) {
     throw "TestAfterBuild 需要本地已加载的镜像。请不要和 -Push 一起使用。"
@@ -233,6 +242,7 @@ $arguments = @(
     '--build-arg', "PYTHON_VERSION=$PythonVersion",
     '--build-arg', "COMFYUI_REPO=$ComfyUIRepo",
     '--build-arg', "COMFYUI_REF=$ComfyUIRef",
+    '--build-arg', "COMFYUI_RESOLVED_COMMIT=$comfyUIResolvedCommit",
     '--build-arg', "CUDA_PROFILE=$PyTorchCudaProfile",
     '--build-arg', "UBUNTU_VERSION=$UbuntuVersion",
     '--build-arg', "UBUNTU_CACHE_KEY=$ubuntuCacheKey",
@@ -249,9 +259,10 @@ $arguments = @(
     '--build-arg', "TORCHAUDIO_VERSION=$torchAudioVersion",
     '--build-arg', "XFORMERS_VERSION=$xformersVersion",
     '--build-arg', "CUSTOM_NODES_CACHE_KEY=$customNodesHash",
-    '--build-arg', "CUSTOM_NODES_LOCK_B64=$customNodesLockB64",
-    '--cache-to', "type=local,dest=$cacheNewDir,mode=max"
+    '--build-arg', "CUSTOM_NODES_LOCK_B64=$customNodesLockB64"
 )
+
+$arguments += @('--cache-to', "type=local,dest=$cacheNewDir,mode=max")
 
 $cacheFromDirs = @()
 if (-not (Test-Path $bootstrapCacheDir) -and -not (Test-Path $finalCacheDir) -and (Test-BuildKitLocalCache -Path $legacyCacheDir)) {
@@ -310,6 +321,7 @@ try {
     if ($BuildStage -eq 'final') {
         Show-CacheState -Label 'BootstrapCache' -CacheDir $bootstrapCacheDir -CacheNewDir $bootstrapCacheNewDir -BaseDir $dockerDir
         Write-Host "[PluginLock] hash=$customNodesHash"
+        Write-Host "[ComfyUI] resolved_commit=$comfyUIResolvedCommit"
     }
     if ($PipIndexUrl) {
         Write-Host "[BuildProxy] PIP_INDEX_URL=$PipIndexUrl"
@@ -344,6 +356,13 @@ try {
 
     Remove-StaleBuildKitNewDirs -ParentDir $bootstrapCacheParentDir -ExcludePath $bootstrapCacheNewDir -BaseDir $dockerDir
     Remove-StaleBuildKitNewDirs -ParentDir $finalCacheParentDir -ExcludePath $finalCacheNewDir -BaseDir $dockerDir
+    if ($BuildStage -eq 'final') {
+        Remove-BuildKitSiblingCaches `
+            -ParentDir $finalCacheParentDir `
+            -CurrentDir $cacheDir `
+            -Patterns @("$cacheKeySuffix*") `
+            -BaseDir $dockerDir
+    }
 
     Show-CacheState -Label 'AfterBuild' -CacheDir $cacheDir -CacheNewDir $cacheNewDir -BaseDir $dockerDir
     Show-CacheState -Label 'LegacyCache' -CacheDir $legacyCacheDir -CacheNewDir $legacyCacheNewDir -BaseDir $dockerDir

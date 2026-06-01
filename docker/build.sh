@@ -21,6 +21,7 @@ MINIFORGE_INSTALLER_URL=""
 PYTHON_VERSION=""
 COMFYUI_REPO=""
 COMFYUI_REF=""
+COMFYUI_RESOLVED_COMMIT=""
 NODEJS_VERSION=""
 TORCH_VERSION=""
 PIP_INDEX_URL=""
@@ -30,6 +31,21 @@ PYTORCH_INDEX_URL_OVERRIDE=""
 PUSH=0
 NO_CACHE=0
 TEST_AFTER_BUILD=0
+
+resolve_python_command() {
+    if command -v python >/dev/null 2>&1; then
+        PYTHON_BIN="python"
+        return 0
+    fi
+
+    if command -v python3 >/dev/null 2>&1; then
+        PYTHON_BIN="python3"
+        return 0
+    fi
+
+    echo "未找到可用的 Python 解释器，请安装 python 或 python3。" >&2
+    exit 1
+}
 
 usage() {
     cat <<'EOF'
@@ -81,6 +97,35 @@ append_unique() {
         fi
     done
     CACHE_FROM_DIRS+=("${value}")
+}
+
+remove_sibling_caches() {
+    local parent_dir="$1"
+    local current_dir="$2"
+    shift 2
+    local patterns=("$@")
+    local dir pattern matched
+
+    [[ -d "${parent_dir}" ]] || return 0
+    shopt -s nullglob
+    for dir in "${parent_dir}"/*; do
+        [[ -d "${dir}" ]] || continue
+        [[ "${dir}" == "${current_dir}" ]] && continue
+        [[ "${dir}" == *-new ]] && continue
+
+        matched=0
+        for pattern in "${patterns[@]}"; do
+            if [[ "$(basename "${dir}")" == ${pattern} ]]; then
+                matched=1
+                break
+            fi
+        done
+
+        if [[ "${matched}" -eq 1 ]]; then
+            rm -rf "${dir}"
+        fi
+    done
+    shopt -u nullglob
 }
 
 remove_stale_new_dirs() {
@@ -149,6 +194,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 ensure_env_file
+resolve_python_command
 
 RESOLVER_ARGS=(
     "${RESOLVER_SCRIPT}"
@@ -174,7 +220,7 @@ RESOLVER_ARGS=(
 [[ -n "${PIP_TRUSTED_HOST}" ]] && RESOLVER_ARGS+=(--pip-trusted-host "${PIP_TRUSTED_HOST}")
 [[ -n "${PYTORCH_INDEX_URL_OVERRIDE}" ]] && RESOLVER_ARGS+=(--pytorch-index-url-override "${PYTORCH_INDEX_URL_OVERRIDE}")
 
-eval "$(python "${RESOLVER_ARGS[@]}")"
+eval "$("${PYTHON_BIN}" "${RESOLVER_ARGS[@]}")"
 
 if [[ "${PUSH}" -eq 1 && "${TEST_AFTER_BUILD}" -eq 1 ]]; then
     echo "test-after-build 需要本地已加载镜像，请不要和 --push 一起使用。" >&2
@@ -252,6 +298,7 @@ BUILD_ARGS=(
     --build-arg "PYTHON_VERSION=${PYTHON_VERSION}"
     --build-arg "COMFYUI_REPO=${COMFYUI_REPO}"
     --build-arg "COMFYUI_REF=${COMFYUI_REF}"
+    --build-arg "COMFYUI_RESOLVED_COMMIT=${COMFYUI_RESOLVED_COMMIT}"
     --build-arg "CUDA_PROFILE=${PYTORCH_CUDA_PROFILE}"
     --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}"
     --build-arg "UBUNTU_CACHE_KEY=${UBUNTU_CACHE_KEY}"
@@ -269,8 +316,9 @@ BUILD_ARGS=(
     --build-arg "XFORMERS_VERSION=${XFORMERS_VERSION}"
     --build-arg "CUSTOM_NODES_CACHE_KEY=${CUSTOM_NODES_HASH}"
     --build-arg "CUSTOM_NODES_LOCK_B64=${CUSTOM_NODES_LOCK_B64}"
-    --cache-to "type=local,dest=${CACHE_NEW_DIR},mode=max"
 )
+
+BUILD_ARGS+=(--cache-to "type=local,dest=${CACHE_NEW_DIR},mode=max")
 
 for cache_from_dir in "${CACHE_FROM_DIRS[@]:-}"; do
     BUILD_ARGS+=(--cache-from "type=local,src=${cache_from_dir}")
@@ -292,6 +340,7 @@ echo "[Build] IMAGE_TAG=${IMAGE_TAG}"
 echo "[Build] BUILD_STAGE=${BUILD_STAGE}"
 echo "[Build] VARIANT=${VARIANT}"
 echo "[Build] PYTORCH_INDEX_URL=${PYTORCH_INDEX_URL}"
+echo "[ComfyUI] RESOLVED_COMMIT=${COMFYUI_RESOLVED_COMMIT}"
 
 (
     cd "${ROOT_DIR}"
@@ -301,6 +350,9 @@ echo "[Build] PYTORCH_INDEX_URL=${PYTORCH_INDEX_URL}"
 rm -rf "${CACHE_DIR}"
 if [[ -d "${CACHE_NEW_DIR}" ]]; then
     mv "${CACHE_NEW_DIR}" "${CACHE_DIR}"
+fi
+if [[ "${BUILD_STAGE}" == "final" ]]; then
+    remove_sibling_caches "${FINAL_CACHE_PARENT_DIR}" "${CACHE_DIR}" "${CACHE_KEY_SUFFIX}"*
 fi
 
 if [[ "${TEST_AFTER_BUILD}" -eq 1 ]]; then

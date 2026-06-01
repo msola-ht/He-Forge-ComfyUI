@@ -150,3 +150,56 @@ function Remove-BuildKitSiblingCaches {
         Remove-BuildKitCacheDirectory -Path $siblingDir.FullName -Reason 'superseded-family-cache' -BaseDir $BaseDir
     }
 }
+
+function Resolve-RemoteGitCommit {
+    param(
+        [string]$Repo,
+        [string]$Ref
+    )
+
+    if (-not $Ref) {
+        throw "Git 引用不能为空。"
+    }
+
+    if ($Ref -match '^[0-9a-fA-F]{40}$') {
+        return $Ref.ToLowerInvariant()
+    }
+
+    if ($Ref.StartsWith('refs/')) {
+        $patterns = @("${Ref}^{}", $Ref)
+    } else {
+        $patterns = @(
+            "refs/tags/$Ref^{}",
+            "refs/tags/$Ref",
+            "refs/heads/$Ref",
+            $Ref
+        )
+    }
+
+    $output = & git ls-remote $Repo @patterns
+    if ($LASTEXITCODE -ne 0) {
+        throw "执行 git ls-remote 失败：repo=$Repo ref=$Ref"
+    }
+
+    $resolvedByName = @{}
+    foreach ($line in $output) {
+        if (-not $line) {
+            continue
+        }
+
+        $parts = ($line -split '\s+', 2)
+        if ($parts.Count -lt 2) {
+            continue
+        }
+
+        $resolvedByName[$parts[1]] = $parts[0].ToLowerInvariant()
+    }
+
+    foreach ($pattern in $patterns) {
+        if ($resolvedByName.ContainsKey($pattern)) {
+            return $resolvedByName[$pattern]
+        }
+    }
+
+    throw "未找到远端引用：repo=$Repo ref=$Ref"
+}

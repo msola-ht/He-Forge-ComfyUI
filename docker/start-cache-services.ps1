@@ -73,9 +73,11 @@ $envValues = Read-EnvFile -Path $envFile
 
 $devpiPort = Use-EnvValue -Values $envValues -Name 'DEVPI_PORT' -CurrentValue '3141'
 $pyTorchProxyPort = Use-EnvValue -Values $envValues -Name 'PYTORCH_PROXY_PORT' -CurrentValue '3143'
+$nvidiaProxyPort = Use-EnvValue -Values $envValues -Name 'NVIDIA_PROXY_PORT' -CurrentValue '3144'
 $cacheHost = 'host.docker.internal'
 
 $pipIndexUrl = "http://${cacheHost}:$devpiPort/root/pypi/+simple/"
+$pipExtraIndexUrl = "http://${cacheHost}:$nvidiaProxyPort/"
 $pipTrustedHost = $cacheHost
 $pyTorchIndexUrlOverride = "http://${cacheHost}:$pyTorchProxyPort/whl/{profile}"
 
@@ -83,7 +85,7 @@ $arguments = @('--profile', 'cache', 'up', '--detach')
 if ($ComposeArgs) {
     $arguments += $ComposeArgs
 }
-$arguments += @('devpi', 'pytorch-proxy')
+$arguments += @('devpi', 'pytorch-proxy', 'nvidia-proxy')
 
 & $composeScript @arguments
 if ($LASTEXITCODE -ne 0) {
@@ -93,6 +95,7 @@ if ($LASTEXITCODE -ne 0) {
 $localhost = '127.0.0.1'
 Wait-TcpEndpoint -Label 'devpi' -HostName $localhost -Port ([int]$devpiPort)
 Wait-TcpEndpoint -Label 'pytorch-proxy' -HostName $localhost -Port ([int]$pyTorchProxyPort)
+Wait-TcpEndpoint -Label 'nvidia-proxy' -HostName $localhost -Port ([int]$nvidiaProxyPort)
 
 if (-not $SkipEnvUpdate) {
     Remove-EnvValue -Path $envFile -Name 'APT_HTTP_PROXY'
@@ -100,11 +103,13 @@ if (-not $SkipEnvUpdate) {
     Remove-EnvValue -Path $envFile -Name 'APT_CACHE_PORT'
     Remove-EnvValue -Path $envFile -Name 'APT_CACHE_DATA_DIR'
     Set-EnvValue -Path $envFile -Name 'PIP_INDEX_URL' -Value $pipIndexUrl
+    Set-EnvValue -Path $envFile -Name 'PIP_EXTRA_INDEX_URL' -Value $pipExtraIndexUrl
     Set-EnvValue -Path $envFile -Name 'PIP_TRUSTED_HOST' -Value $pipTrustedHost
     Set-EnvValue -Path $envFile -Name 'PYTORCH_INDEX_URL_OVERRIDE' -Value $pyTorchIndexUrlOverride
 
     Write-Host "[CacheEnv] Updated docker/.env"
     Write-Host "[CacheEnv] PIP_INDEX_URL=$pipIndexUrl"
+    Write-Host "[CacheEnv] PIP_EXTRA_INDEX_URL=$pipExtraIndexUrl"
     Write-Host "[CacheEnv] PIP_TRUSTED_HOST=$pipTrustedHost"
     Write-Host "[CacheEnv] PYTORCH_INDEX_URL_OVERRIDE=$pyTorchIndexUrlOverride"
 }

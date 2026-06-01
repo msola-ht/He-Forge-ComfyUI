@@ -14,7 +14,23 @@ ensure_env_file() {
     fi
 }
 
+resolve_python_command() {
+    if command -v python >/dev/null 2>&1; then
+        PYTHON_BIN="python"
+        return 0
+    fi
+
+    if command -v python3 >/dev/null 2>&1; then
+        PYTHON_BIN="python3"
+        return 0
+    fi
+
+    echo "未找到可用的 Python 解释器，请安装 python 或 python3。" >&2
+    exit 1
+}
+
 ensure_env_file
+resolve_python_command
 
 if [[ $# -gt 0 && "$1" == "build" ]]; then
     echo "构建入口已统一为 docker/build.sh。请使用：bash docker/build.sh" >&2
@@ -22,7 +38,7 @@ if [[ $# -gt 0 && "$1" == "build" ]]; then
 fi
 
 eval "$(
-    python "${RESOLVER_SCRIPT}" \
+    "${PYTHON_BIN}" "${RESOLVER_SCRIPT}" \
         --mode compose \
         --env-file "${ENV_FILE}"
 )"

@@ -25,6 +25,17 @@ services:
       - ${PYTORCH_PROXY_CACHE_DIR:-../storage/cache-services/pytorch-proxy}:/var/cache/nginx/pytorch
     restart: unless-stopped
 
+  nvidia-proxy:
+    image: nginx:alpine
+    profiles:
+      - cache
+    ports:
+      - "${NVIDIA_PROXY_PORT:-3144}:80"
+    volumes:
+      - ./cache/nginx-nvidia.conf:/etc/nginx/nginx.conf:ro
+      - ${NVIDIA_PROXY_CACHE_DIR:-../storage/cache-services/nvidia-proxy}:/var/cache/nginx/nvidia
+    restart: unless-stopped
+
   comfyui-runtime:
     image: ${IMAGE_NAME:-hegenai/comfyui}:${RUNTIME_IMAGE_TAG:-ubuntu22.04-py312-cu128-torch2.7.0-runtime}
     ports:

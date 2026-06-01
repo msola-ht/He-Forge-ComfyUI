@@ -57,12 +57,12 @@ function Invoke-ImageSmokeTest {
         Invoke-DockerTestCommand -Name '内置 custom nodes 插件' -ImageTag $ImageTag -Command @(
             'bash',
             '-lc',
-            'test -d /root/ComfyUI/custom_nodes/comfyui-manager && test -d /root/ComfyUI/custom_nodes/ComfyUI-DD-Translation && echo "custom_nodes=ok"'
+            'seed_dir=/root/ComfyUI-seed/custom_nodes; target_dir=/root/ComfyUI/custom_nodes; test -d "$seed_dir"; missing=0; for seed_node in "$seed_dir"/*; do [ -d "$seed_node" ] || continue; node_name=$(basename "$seed_node"); if [ ! -d "$target_dir/$node_name" ]; then echo "missing custom node: $node_name" >&2; missing=1; fi; done; [ "$missing" -eq 0 ] && echo "custom_nodes=ok"'
         )
         Invoke-DockerTestCommand -Name '已有目录补齐缺失插件' -ImageTag $ImageTag -Command @(
             'bash',
             '-lc',
-            'mkdir -p /tmp/existing-comfyui/custom_nodes && cp /root/ComfyUI-seed/main.py /tmp/existing-comfyui/main.py && COMFYUI_HOME=/tmp/existing-comfyui /usr/local/bin/entrypoint.sh true && test -d /tmp/existing-comfyui/custom_nodes/comfyui-manager && test -d /tmp/existing-comfyui/custom_nodes/ComfyUI-DD-Translation && echo "existing_dir_sync=ok"'
+            'seed_dir=/root/ComfyUI-seed/custom_nodes; target_dir=/tmp/existing-comfyui/custom_nodes; mkdir -p "$target_dir"; cp /root/ComfyUI-seed/main.py /tmp/existing-comfyui/main.py; COMFYUI_HOME=/tmp/existing-comfyui /usr/local/bin/entrypoint.sh true; missing=0; for seed_node in "$seed_dir"/*; do [ -d "$seed_node" ] || continue; node_name=$(basename "$seed_node"); if [ ! -d "$target_dir/$node_name" ]; then echo "missing synced custom node: $node_name" >&2; missing=1; fi; done; [ "$missing" -eq 0 ] && echo "existing_dir_sync=ok"'
         )
     }
 

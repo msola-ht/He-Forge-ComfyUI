@@ -1,13 +1,44 @@
 param(
     [string]$Service = 'comfyui-runtime',
     [int]$WaitTimeoutSeconds = 30,
-    [string]$ShellWorkDir = '/root/ComfyUI'
+    [string]$ShellWorkDir = ''
 )
 
 $ErrorActionPreference = 'Stop'
 
 $dockerDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$scriptDir = Join-Path $dockerDir 'scripts'
+$envFile = Join-Path $dockerDir '.env'
+$envExampleFile = Join-Path $dockerDir '.env.example'
 $composeScript = Join-Path $dockerDir 'compose.ps1'
+
+. (Join-Path $scriptDir 'env.ps1')
+
+function Resolve-ContainerPath {
+    param(
+        [string]$BasePath,
+        [string]$PathValue
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        return $BasePath
+    }
+
+    $normalizedPath = $PathValue.Replace('\', '/')
+    if ($normalizedPath.StartsWith('/')) {
+        return $normalizedPath
+    }
+
+    return '{0}/{1}' -f $BasePath.TrimEnd('/'), $normalizedPath.TrimStart('/')
+}
+
+function ConvertTo-BashSingleQuotedLiteral {
+    param(
+        [string]$Value
+    )
+
+    return $Value.Replace("'", "'""'""'")
+}
 
 function Invoke-Compose {
     param(
@@ -87,6 +118,12 @@ function Wait-ServiceRunning {
     return $false
 }
 
+Ensure-EnvFile -EnvFile $envFile -EnvExampleFile $envExampleFile
+$envValues = Read-EnvFile -Path $envFile
+$comfyUiHome = Use-EnvValue -Values $envValues -Name 'COMFYUI_HOME' -CurrentValue '/root/ComfyUI'
+$resolvedShellWorkDir = Resolve-ContainerPath -BasePath $comfyUiHome -PathValue $ShellWorkDir
+$escapedShellWorkDir = ConvertTo-BashSingleQuotedLiteral -Value $resolvedShellWorkDir
+
 $runningServices = Get-RunningServices
 
 if ($runningServices -notcontains $Service) {
@@ -112,5 +149,5 @@ if (-not $containerId) {
     exit 1
 }
 
-& docker exec -it $containerId bash -lc "cd '$ShellWorkDir' && exec bash -i"
+& docker exec -it $containerId bash -lc "cd '$escapedShellWorkDir' && exec bash -i"
 exit $LASTEXITCODE

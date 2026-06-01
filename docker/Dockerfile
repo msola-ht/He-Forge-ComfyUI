@@ -13,6 +13,7 @@ ARG MINIFORGE_INSTALLER_URL=https://github.com/conda-forge/miniforge/releases/la
 ARG PYTHON_VERSION=3.12
 ARG COMFYUI_REPO=https://github.com/Comfy-Org/ComfyUI.git
 ARG COMFYUI_REF=master
+ARG COMFYUI_RESOLVED_COMMIT=
 ARG CUDA_PROFILE=cu128
 ARG UBUNTU_VERSION=22.04
 ARG UBUNTU_CACHE_KEY=ubuntu2204
@@ -56,8 +57,17 @@ WORKDIR /root/ComfyUI-src
 
 RUN git init . \
     && git remote add origin "${COMFYUI_REPO}" \
-    && git fetch --depth 1 origin "${COMFYUI_REF}" \
-    && git checkout --detach FETCH_HEAD
+    && if [[ -n "${COMFYUI_RESOLVED_COMMIT}" ]]; then \
+        if git fetch --depth 1 origin "${COMFYUI_REF}"; then \
+            git checkout --detach "${COMFYUI_RESOLVED_COMMIT}"; \
+        else \
+            git fetch origin --tags --prune; \
+            git checkout --detach "${COMFYUI_RESOLVED_COMMIT}"; \
+        fi; \
+    else \
+        git fetch --depth 1 origin "${COMFYUI_REF}" \
+        && git checkout --detach FETCH_HEAD; \
+    fi
 
 
 FROM builder-bootstrap AS builder
@@ -85,7 +95,6 @@ RUN --mount=type=cache,id=${PIP_CACHE_KEY},target=/root/.cache/pip,sharing=locke
     && if [[ -n "${PIP_TRUSTED_HOST}" ]]; then python -m pip config set global.trusted-host "${PIP_TRUSTED_HOST}"; fi
 
 RUN --mount=type=cache,id=${PIP_CACHE_KEY},target=/root/.cache/pip,sharing=locked \
-    --mount=type=cache,id=${PIP_CACHE_KEY}-torch-wheels,target=/root/.cache/pytorch-wheels,sharing=locked \
     python -m pip install --upgrade pip setuptools wheel \
     && PYTORCH_PACKAGES=( \
         "torch==${TORCH_VERSION}" \
@@ -93,13 +102,8 @@ RUN --mount=type=cache,id=${PIP_CACHE_KEY},target=/root/.cache/pip,sharing=locke
         "torchaudio==${TORCHAUDIO_VERSION}" \
     ) \
     && if [[ -n "${XFORMERS_VERSION}" ]]; then PYTORCH_PACKAGES+=("xformers==${XFORMERS_VERSION}"); fi \
-    && python -m pip download \
-        --dest /root/.cache/pytorch-wheels \
-        --index-url "${PYTORCH_INDEX_URL}" \
-        "${PYTORCH_PACKAGES[@]}" \
     && python -m pip install \
-        --no-index \
-        --find-links /root/.cache/pytorch-wheels \
+        --index-url "${PYTORCH_INDEX_URL}" \
         "${PYTORCH_PACKAGES[@]}"
 
 RUN --mount=type=cache,id=${PIP_CACHE_KEY},target=/root/.cache/pip,sharing=locked \

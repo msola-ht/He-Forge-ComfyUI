@@ -2,7 +2,7 @@
 setlocal
 
 set "ROOT=%~dp0"
-pwsh -NoProfile -ExecutionPolicy Bypass -File "%ROOT%docker\open-runtime-shell.ps1" -ShellWorkDir "/root/ComfyUI/custom_nodes"
+pwsh -NoProfile -ExecutionPolicy Bypass -File "%ROOT%docker\open-runtime-shell.ps1" -ShellWorkDir "custom_nodes"
 set "EXIT_CODE=%ERRORLEVEL%"
 
 if not "%EXIT_CODE%"=="0" pause
