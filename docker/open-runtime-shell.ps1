@@ -1,6 +1,6 @@
 param(
     [string]$Service = 'comfyui-runtime',
-    [int]$WaitTimeoutSeconds = 30,
+    [int]$WaitTimeoutSeconds = 60,
     [string]$ShellWorkDir = ''
 )
 
@@ -11,6 +11,7 @@ $scriptDir = Join-Path $dockerDir 'scripts'
 $envFile = Join-Path $dockerDir '.env'
 $envExampleFile = Join-Path $dockerDir '.env.example'
 $composeScript = Join-Path $dockerDir 'compose.ps1'
+$composeProjectName = Split-Path -Leaf $dockerDir
 
 . (Join-Path $scriptDir 'env.ps1')
 
@@ -45,34 +46,45 @@ function Invoke-Compose {
         [string[]]$Arguments
     )
 
-    & pwsh -NoProfile -ExecutionPolicy Bypass -File $composeScript @Arguments
+    & pwsh -NoProfile -ExecutionPolicy Bypass -File $composeScript @Arguments 2>&1 | Out-Host
     return $LASTEXITCODE
 }
 
-function Invoke-ComposeCapture {
+function Open-OneOffShell {
     param(
-        [string[]]$Arguments
+        [string]$TargetService,
+        [string]$WorkingDirectoryLiteral
     )
 
-    $output = & pwsh -NoProfile -ExecutionPolicy Bypass -File $composeScript @Arguments 2>&1
-    $exitCode = $LASTEXITCODE
-    return [pscustomobject]@{
-        Output = @($output)
-        ExitCode = $exitCode
-    }
+    Write-Host "服务 $TargetService 未运行，使用一次性 shell 容器进入..."
+    $command = "cd '$WorkingDirectoryLiteral' && exec bash -i"
+    & pwsh -NoProfile -ExecutionPolicy Bypass -File $composeScript `
+        run `
+        --rm `
+        --entrypoint bash `
+        $TargetService `
+        -lc `
+        $command
+    exit $LASTEXITCODE
 }
 
-function Get-RunningServices {
-    $result = Invoke-ComposeCapture -Arguments @('ps', '--status', 'running', '--services')
-    if ($result.ExitCode -ne 0) {
+function Get-ComposeContainerIds {
+    param(
+        [string]$TargetService
+    )
+
+    $output = & docker ps -aq `
+        --filter "label=com.docker.compose.project=$composeProjectName" `
+        --filter "label=com.docker.compose.service=$TargetService" 2>$null
+    if ($LASTEXITCODE -ne 0) {
         return @()
     }
 
     return @(
-        $result.Output |
+        @($output) |
             Where-Object { $_ -is [string] } |
-            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-            Where-Object { $_ -notmatch '^\[Compose\]' }
+            ForEach-Object { $_.Trim() } |
+            Where-Object { $_ -match '^[0-9a-f]{12,64}$' }
     )
 }
 
@@ -81,22 +93,39 @@ function Get-ContainerId {
         [string]$TargetService
     )
 
-    $result = Invoke-ComposeCapture -Arguments @('ps', '-q', $TargetService)
-    if ($result.ExitCode -ne 0) {
-        return ''
-    }
-
-    $containerId = $result.Output |
-        Where-Object { $_ -is [string] } |
-        ForEach-Object { $_.Trim() } |
-        Where-Object { $_ -match '^[0-9a-f]{12,64}$' } |
-        Select-Object -Last 1
+    $containerId = Get-ComposeContainerIds -TargetService $TargetService | Select-Object -Last 1
 
     if (-not $containerId) {
         return ''
     }
 
     return $containerId
+}
+
+function Test-ContainerRunning {
+    param(
+        [string]$ContainerId
+    )
+
+    if (-not $ContainerId) {
+        return $false
+    }
+
+    $status = & docker inspect $ContainerId --format '{{.State.Status}}' 2>$null
+    return ($LASTEXITCODE -eq 0 -and $status -eq 'running')
+}
+
+function Test-ContainerExecReady {
+    param(
+        [string]$ContainerId
+    )
+
+    if (-not $ContainerId) {
+        return $false
+    }
+
+    & docker exec $ContainerId bash -lc 'exit 0' *> $null
+    return ($LASTEXITCODE -eq 0)
 }
 
 function Wait-ServiceRunning {
@@ -107,8 +136,8 @@ function Wait-ServiceRunning {
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
-        $runningServices = Get-RunningServices
-        if ($runningServices -contains $TargetService) {
+        $containerId = Get-ContainerId -TargetService $TargetService
+        if ($containerId -and (Test-ContainerRunning -ContainerId $containerId)) {
             return $true
         }
 
@@ -118,34 +147,42 @@ function Wait-ServiceRunning {
     return $false
 }
 
+function Wait-ContainerExecReady {
+    param(
+        [string]$TargetService,
+        [int]$TimeoutSeconds
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $containerId = Get-ContainerId -TargetService $TargetService
+        if ($containerId -and (Test-ContainerExecReady -ContainerId $containerId)) {
+            return $containerId
+        }
+
+        Start-Sleep -Milliseconds 750
+    } while ((Get-Date) -lt $deadline)
+
+    return ''
+}
+
 Ensure-EnvFile -EnvFile $envFile -EnvExampleFile $envExampleFile
 $envValues = Read-EnvFile -Path $envFile
 $comfyUiHome = Use-EnvValue -Values $envValues -Name 'COMFYUI_HOME' -CurrentValue '/root/ComfyUI'
 $resolvedShellWorkDir = Resolve-ContainerPath -BasePath $comfyUiHome -PathValue $ShellWorkDir
 $escapedShellWorkDir = ConvertTo-BashSingleQuotedLiteral -Value $resolvedShellWorkDir
 
-$runningServices = Get-RunningServices
+$containerId = Get-ContainerId -TargetService $Service
 
-if ($runningServices -notcontains $Service) {
-    Write-Host "服务 $Service 未运行，正在后台启动..."
-    $startExitCode = Invoke-Compose -Arguments @('up', '--detach', $Service)
-    if ($startExitCode -ne 0) {
-        exit $startExitCode
-    }
-
-    Write-Host "等待 $Service 就绪..."
-    if (-not (Wait-ServiceRunning -TargetService $Service -TimeoutSeconds $WaitTimeoutSeconds)) {
-        Write-Host "服务 $Service 已发起启动，但在 $WaitTimeoutSeconds 秒内未进入 running 状态。"
-        Write-Host "你可以先执行 .\docker\compose.ps1 logs $Service 检查启动日志。"
-        exit 1
-    }
+if (-not ($containerId -and (Test-ContainerRunning -ContainerId $containerId))) {
+    Open-OneOffShell -TargetService $Service -WorkingDirectoryLiteral $escapedShellWorkDir
 }
 
 Write-Host "进入 $Service 交互 shell..."
-$containerId = Get-ContainerId -TargetService $Service
+$containerId = Wait-ContainerExecReady -TargetService $Service -TimeoutSeconds $WaitTimeoutSeconds
 if (-not $containerId) {
-    Write-Host "未能解析 $Service 对应的容器 ID。"
-    Write-Host "你可以先执行 .\docker\compose.ps1 ps $Service 检查容器状态。"
+    Write-Host "容器已经启动，但在 $WaitTimeoutSeconds 秒内仍未准备好接受 docker exec。"
+    Write-Host "你可以先执行 .\docker\compose.ps1 ps $Service 或 .\docker\compose.ps1 logs $Service 检查状态。"
     exit 1
 }
 

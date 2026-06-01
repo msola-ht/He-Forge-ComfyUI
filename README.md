@@ -493,7 +493,7 @@ bash docker/compose.sh up comfyui-devel
 .\进入-ComfyUI-Shell.bat
 ```
 
-这个入口只负责调用 PowerShell 脚本。如果 `comfyui-runtime` 还没启动，它会先自动后台启动并等待容器进入 `running`，然后再进入交互 shell；如果已经在运行，就会直接进入容器交互 shell。这样适合手动 `pip install`、调试插件报错和验证修复结果，而不需要每改一次就重新构建镜像。
+这个入口只负责调用 PowerShell 脚本。如果 `comfyui-runtime` 已经在运行，它会直接进入现有容器的交互 shell；如果还没运行，则会临时起一个一次性 shell 容器进入，不会顺手把 ComfyUI 主服务一起启动。这样适合手动 `pip install`、调试插件报错和验证修复结果，而不需要每改一次就重新构建镜像。
 
 默认会落在 `COMFYUI_HOME` 指向的目录；如果没有额外改动 `.env`，默认就是：
 
