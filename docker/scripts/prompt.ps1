@@ -100,6 +100,7 @@ function Show-VersionConfig {
     Write-Host "  CUDA_IMAGE_VERSION=$($Config.CudaImageVersion)"
     Write-Host "  PYTORCH_CUDA_PROFILE=$($Config.PyTorchCudaProfile)"
     Write-Host "  UBUNTU_VERSION=$($Config.UbuntuVersion)"
+    Write-Host "  COMFYUI_GPU_MODE=$($Config.ComfyUiGpuMode)"
     Write-Host "  TORCH_VERSION=$($Config.TorchVersion)"
     Write-Host "  NODEJS_VERSION=$($Config.NodeJsVersion)"
     Write-Host "  PYTHON_VERSION=$($Config.PythonVersion)"
@@ -118,6 +119,7 @@ function Edit-VersionConfig {
     $Config.CudaImageVersion = Select-Option -Label 'CUDA 镜像版本' -CurrentValue $Config.CudaImageVersion -Options (Get-CudaImageVersionOptions -UbuntuVersion $Config.UbuntuVersion)
     $Config.TorchVersion = Select-Option -Label 'Torch 版本' -CurrentValue $Config.TorchVersion -Options (Get-TorchVersionOptions)
     $Config.PyTorchCudaProfile = Select-Option -Label 'PyTorch CUDA 源' -CurrentValue $Config.PyTorchCudaProfile -Options (Get-PyTorchCudaProfileOptions -TorchVersion $Config.TorchVersion)
+    $Config.ComfyUiGpuMode = Select-Option -Label 'GPU 模式' -CurrentValue $Config.ComfyUiGpuMode -Options @('auto', 'on', 'off')
     $Config.NodeJsVersion = Select-Option -Label 'Node.js 版本' -CurrentValue $Config.NodeJsVersion -Options (Get-NodeJsVersionOptions)
     $Config.PythonVersion = Select-TextValue -Label 'Python 版本前缀' -CurrentValue $Config.PythonVersion
     $Config.ComfyUIRef = Select-TextValue -Label 'ComfyUI 引用（分支、标签或提交）' -CurrentValue $Config.ComfyUIRef

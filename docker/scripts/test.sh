@@ -4,11 +4,12 @@ set -euo pipefail
 
 IMAGE_TAG=""
 BUILD_STAGE=""
+GPU_ENABLED="1"
 
 usage() {
     cat <<'EOF'
 用法：
-  bash docker/scripts/test.sh --image-tag <tag> --build-stage <bootstrap|final>
+  bash docker/scripts/test.sh --image-tag <tag> --build-stage <bootstrap|final> [--gpu-enabled <0|1>]
 EOF
 }
 
@@ -34,6 +35,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --image-tag) IMAGE_TAG="$2"; shift 2 ;;
         --build-stage) BUILD_STAGE="$2"; shift 2 ;;
+        --gpu-enabled) GPU_ENABLED="$2"; shift 2 ;;
         --help|-h) usage; exit 0 ;;
         *)
             echo "未知参数：$1" >&2
@@ -45,6 +47,11 @@ done
 
 if [[ -z "${IMAGE_TAG}" || -z "${BUILD_STAGE}" ]]; then
     usage >&2
+    exit 1
+fi
+
+if [[ "${GPU_ENABLED}" != "0" && "${GPU_ENABLED}" != "1" ]]; then
+    echo "gpu-enabled 仅支持 0 或 1，当前值：${GPU_ENABLED}" >&2
     exit 1
 fi
 
@@ -63,12 +70,17 @@ docker_test_command \
     'test -f /root/ComfyUI-seed/main.py && test -f /root/ComfyUI/main.py && test -d /root/miniforge && echo "ComfyUI seed and Miniforge OK"'
 
 if [[ "${BUILD_STAGE}" == "final" ]]; then
-    docker_test_command \
-        "PyTorch CUDA 可用性" \
-        1 \
-        python \
-        -c \
-        'import torch, torchvision, torchaudio; print("torch=" + torch.__version__); print("torchvision=" + torchvision.__version__); print("torchaudio=" + torchaudio.__version__); import xformers; print("xformers=" + xformers.__version__); print("cuda_available=" + str(torch.cuda.is_available())); assert torch.cuda.is_available(), "CUDA is not available"; print("gpu=" + torch.cuda.get_device_name(0))'
+    if [[ "${GPU_ENABLED}" == "1" ]]; then
+        docker_test_command \
+            "PyTorch CUDA 可用性" \
+            1 \
+            python \
+            -c \
+            'import torch, torchvision, torchaudio; print("torch=" + torch.__version__); print("torchvision=" + torchvision.__version__); print("torchaudio=" + torchaudio.__version__); import xformers; print("xformers=" + xformers.__version__); print("cuda_available=" + str(torch.cuda.is_available())); assert torch.cuda.is_available(), "CUDA is not available"; print("gpu=" + torch.cuda.get_device_name(0))'
+    else
+        echo
+        echo "[Test] 跳过 PyTorch CUDA 可用性：当前 GPU 模式未启用"
+    fi
     docker_test_command \
         "ComfyUI Python 导入" \
         0 \

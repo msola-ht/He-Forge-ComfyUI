@@ -16,6 +16,7 @@ $defaults = @{
     CudaImageVersion = '12.8.2'
     PyTorchCudaProfile = 'cu128'
     UbuntuVersion = '22.04'
+    ComfyUiGpuMode = 'auto'
     MiniforgeInstallerUrl = 'https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh'
     PythonVersion = '3.12'
     ComfyUIRepo = 'https://github.com/Comfy-Org/ComfyUI.git'
@@ -42,6 +43,7 @@ Save-VersionConfig `
     -CudaImageVersion $versionConfig.CudaImageVersion `
     -PyTorchCudaProfile $versionConfig.PyTorchCudaProfile `
     -UbuntuVersion $versionConfig.UbuntuVersion `
+    -ComfyUiGpuMode $versionConfig.ComfyUiGpuMode `
     -MiniforgeInstallerUrl $versionConfig.MiniforgeInstallerUrl `
     -PythonVersion $versionConfig.PythonVersion `
     -ComfyUIRepo $versionConfig.ComfyUIRepo `

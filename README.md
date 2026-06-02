@@ -1,6 +1,6 @@
 # He-Forge-ComfyUI Docker 构建
 
-这个仓库用于构建内置 `ComfyUI`、`Miniforge` 和 `Python 3.12` 的 Docker 镜像，并支持在 Windows 下使用 `BuildKit` 本地缓存来复用 `apt`、`pip`、`conda` 下载内容。当前同时补充了 `bash` 入口，后续在 Linux / macOS 下也可以直接复用同一套版本推导与缓存布局。
+这个仓库用于构建内置 `ComfyUI`、`Miniforge` 和 `Python 3.12` 的 Docker 镜像，并支持在 Windows 下使用 `BuildKit` 本地缓存来复用 `apt`、`pip`、`conda` 下载内容。当前同时补充了 `bash` 入口，Linux 和 Windows 可以复用同一套版本推导与缓存布局。
 
 ## 内置内容
 
@@ -51,8 +51,9 @@ docker/plugins/custom-nodes.json
 docker/.buildx-cache-v2/final/<版本组合>-plugins<插件锁哈希>
 ```
 
-这样插件仓库即使仍然写分支名，只要上游提交变化，`final` 缓存也会自动切到新的插件锁版本；与此同时，不同插件组合不会互相覆盖最终阶段缓存，仍然会被保留下来，并可以继续复用 `bootstrap` 阶段和 PyTorch 大层缓存。
-构建脚本也会尝试把同版本的旧 `final` 缓存作为 `cache-from` 来源，因此在插件清单或插件 commit 变化后，后续第一次完整构建仍有机会复用之前的 PyTorch 与 Python 依赖层，而不是全部重下。
+这样插件仓库即使仍然写分支名，只要上游提交变化，`final` 缓存也会自动切到新的插件锁版本。
+同一个版本组合下，成功构建后只保留最近一次的 `final` 缓存；旧的同版本缓存会在轮换完成后清理掉，避免本地缓存目录持续膨胀。
+构建脚本在本次构建期间仍会尽量把同版本的旧 `final` 缓存作为 `cache-from` 来源，因此在插件清单或插件 commit 变化后，后续第一次完整构建仍有机会复用之前的 PyTorch 与 Python 依赖层，而不是全部重下。
 另外，构建阶段现在不再先做宿主机 wheelhouse 预热，而是直接结合 BuildKit 的 `pip` 缓存和本地代理缓存服务构建。这样可以少一层预热失败点，同时仍然尽量复用 `devpi`、`pytorch-proxy`、`nvidia-proxy` 已经缓存下来的内容。
 
 ## CUDA 与 PyTorch 源
@@ -158,7 +159,7 @@ Docker 相关文件已经集中到 `docker/` 目录，推荐结构如下：
 .\构建-ComfyUI.bat
 ```
 
-如果当前不是 Windows，而是 Linux / macOS，使用：
+如果当前不是 Windows，而是 Linux，使用：
 
 ```bash
 bash docker/build.sh
@@ -166,7 +167,7 @@ bash docker/build.sh
 
 `build.ps1` 会读取当前 `docker/.env`，先询问是否修改版本配置；如果修改，会保存回 `docker/.env`，然后继续询问这次要跑 `bootstrap` 还是 `final`，最后直接开始构建。
 在交互模式下，脚本还会继续询问“构建完成后是否运行镜像自检”，默认会直接执行自检。
-`build.sh` 则是非交互入口：它会读取 `docker/.env`，并接受命令行参数覆盖部分版本配置；如果你在 Linux / macOS 下需要改默认值，优先直接编辑 `docker/.env`。
+`build.sh` 则是非交互入口：它会读取 `docker/.env`，并接受命令行参数覆盖部分版本配置；如果你在 Linux 下需要改默认值，优先直接编辑 `docker/.env`。
 
 如果你想临时覆盖 `.env` 中的部分版本配置，也可以通过参数构建：
 
@@ -215,7 +216,19 @@ bash docker/build.sh --build-stage final --test-after-build
 `bootstrap` 阶段会测试 `Python`、`Node.js`、`npm`、`uv`、`ComfyUI seed` 和 `Miniforge` 路径。
 `final` 阶段会额外测试 `PyTorch`、`torchvision`、`torchaudio`、`xformers`、CUDA 可用性、GPU 名称和 `ComfyUI` Python 导入。
 如果当前镜像内置了 custom nodes，自检也会检查 `ComfyUI Manager` 和 `ComfyUI DD Translation` 是否存在于 `/root/ComfyUI/custom_nodes`。
-如果当前是 macOS 或其他不支持 `docker run --gpus all` 的环境，建议不要开启 `--test-after-build`；Bash 构建入口本身可以继续使用，但 `final` 阶段的 GPU 自检需要在支持 NVIDIA GPU 透传的环境里执行。
+如果当前 Linux 环境不支持 `docker run --gpus all`，建议不要开启 `--test-after-build`；`final` 阶段的 GPU 自检需要在支持 NVIDIA GPU 透传的环境里执行。
+
+如果你需要在没有 NVIDIA runtime 的 Linux 或 Windows 环境里继续启动容器，可以在 `docker/.env` 里设置：
+
+```dotenv
+COMFYUI_GPU_MODE=off
+```
+
+可选值为：
+
+- `auto`：自动检测 Docker 是否提供 NVIDIA runtime；检测不到时自动回退为 CPU 模式
+- `on`：强制启用 GPU 运行参数
+- `off`：强制关闭 GPU 运行参数
 
 镜像 tag 会随关键版本自动变化，规则为：
 
@@ -330,6 +343,7 @@ PYTORCH_INDEX_URL_OVERRIDE=http://host.docker.internal:3143/whl/{profile}
 - `cu126 -> http://host.docker.internal:3143/whl/cu126`
 
 这样后续 `build.ps1` 再执行 `pip install`、`pip install torch... --index-url ...` 时，普通 PyPI、PyTorch wheel 源和 `pypi.nvidia.com` 上的 `nvidia-*` 大包都会优先打到你本机这些缓存容器，而不是每次都直接出公网。
+Linux 下构建入口现在会自动追加 `host.docker.internal=host-gateway`，因此上面的代理地址可以直接复用到 `docker buildx build`。
 
 ## 运行方式
 
@@ -345,6 +359,7 @@ Copy-Item .\docker\.env.example .\docker\.env
 CUDA_IMAGE_VERSION=12.8.2
 PYTORCH_CUDA_PROFILE=cu128
 UBUNTU_VERSION=22.04
+COMFYUI_GPU_MODE=auto
 ```
 
 `CUDA_VERSION` 不需要在 `.env` 里手写，构建入口会根据 `CUDA_IMAGE_VERSION` 和 `UBUNTU_VERSION` 自动推导实际基础镜像。
@@ -480,7 +495,7 @@ bash docker/compose.sh up comfyui-devel
 版本配置入口为 `docker/configure.ps1`，它只负责交互式写入 `docker/.env`，直接回车会保留当前值，包括 `PIP_INDEX_URL`、`PIP_EXTRA_INDEX_URL`、`PIP_TRUSTED_HOST` 和 `PYTORCH_INDEX_URL_OVERRIDE` 这类镜像源配置。
 构建逻辑统一由 `docker/build.ps1` 负责；根目录 `.\构建-ComfyUI.bat` 只是薄包装调用。直接运行 `.\docker\build.ps1` 或 `.\构建-ComfyUI.bat` 都会先确认版本配置，再选择构建阶段并开始构建。
 如果要跳过所有交互并使用 `docker/.env`，使用 `.\docker\build.ps1 -FromEnv -BuildStage final`、`.\docker\build.ps1 -FromEnv -BuildStage bootstrap`，或者等价地通过 `.\构建-ComfyUI.bat -FromEnv -BuildStage final` 调用。
-如果当前是 Linux / macOS，直接使用 `bash docker/build.sh`；这个入口不做交互式提问，默认读取 `docker/.env`，需要调整配置时直接编辑 `.env` 或通过 `--torch-version`、`--pytorch-cuda-profile`、`--build-stage`、`--variant` 这类参数覆盖。macOS 下可以使用这个入口完成构建，但 `final` 阶段的 GPU 自检仍然需要支持 NVIDIA GPU 透传的环境。
+如果当前是 Linux，直接使用 `bash docker/build.sh`；这个入口不做交互式提问，默认读取 `docker/.env`，需要调整配置时直接编辑 `.env` 或通过 `--torch-version`、`--pytorch-cuda-profile`、`--build-stage`、`--variant` 这类参数覆盖。
 
 `docker compose` 推荐通过 `docker/compose.ps1` 或 `docker/compose.sh` 间接调用，主要负责启动、停止、查看日志等运行期操作。
 `compose.ps1` / `compose.sh` 都会读取 `docker/.env`，并根据 `CUDA_IMAGE_VERSION` 和 `UBUNTU_VERSION` 推导实际 CUDA 镜像标签。
@@ -587,7 +602,7 @@ storage/devel/exports/<时间戳>/
 - `xformers` 会从同一份版本矩阵解析；如果当前 `TorchVersion + PYTORCH_CUDA_PROFILE` 没有匹配 wheel，则不会强行安装，避免 pip 改写 PyTorch 版本
 - 构建逻辑统一收口到 `.\docker\build.ps1`；如果你更习惯双击或从根目录调用，也可以使用只做转发的 `.\构建-ComfyUI.bat`
 - 缓存容器提供了根目录入口 `.\启动-缓存容器.bat`；它会先按 `DEVPI_PORT`、`PYTORCH_PROXY_PORT`、`NVIDIA_PROXY_PORT` 自动写入缓存代理配置到 `docker/.env`，再启动 `devpi`、`pytorch-proxy`、`nvidia-proxy`
-- 非 Windows 环境可以使用 `bash docker/build.sh` 和 `bash docker/compose.sh` 复用同一套版本解析与缓存目录规则
+- Linux 环境可以使用 `bash docker/build.sh` 和 `bash docker/compose.sh` 复用同一套版本解析与缓存目录规则
 - `BuildStage=bootstrap` 只预热系统、Python、ComfyUI 源码、Node 和 uv；`BuildStage=final` 才安装 PyTorch 和 ComfyUI 依赖
 - 当前默认安装命令等价于 `pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 xformers==0.0.30 --index-url <随 PyTorchCudaProfile 自动匹配>`
 - 当前内置匹配来自 `docker/data/pytorch-tags.json`，默认包含官方页面解析到的 `torch/torchvision/torchaudio/xformers` 对应关系

@@ -5,6 +5,7 @@ import json
 import re
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -23,6 +24,7 @@ DEFAULTS = {
     "PipExtraIndexUrl": "",
     "PipTrustedHost": "",
     "PyTorchIndexUrlOverride": "",
+    "ComfyUiGpuMode": "auto",
 }
 
 
@@ -74,6 +76,7 @@ def get_version_config(values: dict[str, str], overrides: dict[str, str | None])
             "PYTORCH_INDEX_URL_OVERRIDE",
             DEFAULTS["PyTorchIndexUrlOverride"],
         ),
+        "ComfyUiGpuMode": use_env_value(values, "COMFYUI_GPU_MODE", DEFAULTS["ComfyUiGpuMode"]),
     }
 
     for key, value in overrides.items():
@@ -219,7 +222,7 @@ def resolve_cache_key_suffix(
 
 def resolve_plugin_lock(manifest_path: Path, script_path: Path) -> str:
     result = subprocess.run(
-        ["python", str(script_path), "--manifest", str(manifest_path)],
+        [sys.executable, str(script_path), "--manifest", str(manifest_path)],
         capture_output=True,
         text=True,
         check=False,
@@ -405,6 +408,7 @@ def main() -> None:
         "PIP_EXTRA_INDEX_URL": config["PipExtraIndexUrl"],
         "PIP_TRUSTED_HOST": config["PipTrustedHost"],
         "PYTORCH_INDEX_URL_OVERRIDE": config["PyTorchIndexUrlOverride"],
+        "COMFYUI_GPU_MODE": config["ComfyUiGpuMode"],
         "CUDA_VERSION": cuda_image_set["CudaVersion"],
         "UBUNTU_CACHE_KEY": cuda_image_set["UbuntuCacheKey"],
         "APT_CACHE_KEY": apt_cache_key,

@@ -59,7 +59,8 @@ services:
       - ${RUNTIME_CONDA_CACHE_DIR:-../storage/runtime/cache/conda-pkgs}:${CONDA_PKGS_DIRS:-/root/miniforge/pkgs}
       - ${RUNTIME_NPM_CACHE_DIR:-../storage/runtime/cache/npm}:${NPM_CONFIG_CACHE:-/root/.npm}
       - ${RUNTIME_UV_CACHE_DIR:-../storage/runtime/cache/uv}:${UV_CACHE_DIR:-/root/.cache/uv}
-    gpus: all
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   comfyui-devel:
     image: ${IMAGE_NAME:-hegenai/comfyui}:${DEVEL_IMAGE_TAG:-ubuntu22.04-py312-cu128-torch2.7.0-devel}
@@ -84,4 +85,5 @@ services:
       - ${DEVEL_CONDA_CACHE_DIR:-../storage/devel/cache/conda-pkgs}:${CONDA_PKGS_DIRS:-/root/miniforge/pkgs}
       - ${DEVEL_NPM_CACHE_DIR:-../storage/devel/cache/npm}:${NPM_CONFIG_CACHE:-/root/.npm}
       - ${DEVEL_UV_CACHE_DIR:-../storage/devel/cache/uv}:${UV_CACHE_DIR:-/root/.cache/uv}
-    gpus: all
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

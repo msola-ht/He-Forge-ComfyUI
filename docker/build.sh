@@ -32,6 +32,66 @@ PUSH=0
 NO_CACHE=0
 TEST_AFTER_BUILD=0
 
+assert_supported_host_os() {
+    local os_name
+    os_name="$(uname -s)"
+    case "${os_name}" in
+        Linux)
+            ;;
+        Darwin)
+            echo "当前不支持 macOS 构建。请改用 Linux 或 Windows。" >&2
+            exit 1
+            ;;
+        *)
+            echo "当前仅支持 Linux 和 Windows 宿主机。检测到：${os_name}" >&2
+            exit 1
+            ;;
+    esac
+}
+
+docker_runtime_supports_gpu() {
+    local runtimes_json
+    runtimes_json="$(docker info --format '{{json .Runtimes}}' 2>/dev/null || true)"
+    [[ "${runtimes_json}" == *'"nvidia"'* ]]
+}
+
+resolve_gpu_mode() {
+    local raw_mode="${COMFYUI_GPU_MODE:-auto}"
+    local normalized_mode="${raw_mode,,}"
+
+    case "${normalized_mode}" in
+        auto)
+            if docker_runtime_supports_gpu; then
+                GPU_ENABLED=1
+            else
+                GPU_ENABLED=0
+            fi
+            ;;
+        on|true|1|yes)
+            GPU_ENABLED=1
+            ;;
+        off|false|0|no)
+            GPU_ENABLED=0
+            ;;
+        *)
+            echo "不支持的 COMFYUI_GPU_MODE：${raw_mode}。可选值：auto、on、off。" >&2
+            exit 1
+            ;;
+    esac
+
+    GPU_MODE_RESOLVED="${normalized_mode}"
+}
+
+needs_host_gateway_alias() {
+    local value
+    for value in "${PIP_INDEX_URL}" "${PIP_EXTRA_INDEX_URL}" "${PYTORCH_INDEX_URL_OVERRIDE:-}"; do
+        if [[ "${value}" == *"host.docker.internal"* ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 resolve_python_command() {
     if command -v python >/dev/null 2>&1; then
         PYTHON_BIN="python"
@@ -194,6 +254,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 ensure_env_file
+assert_supported_host_os
 resolve_python_command
 
 RESOLVER_ARGS=(
@@ -221,6 +282,7 @@ RESOLVER_ARGS=(
 [[ -n "${PYTORCH_INDEX_URL_OVERRIDE}" ]] && RESOLVER_ARGS+=(--pytorch-index-url-override "${PYTORCH_INDEX_URL_OVERRIDE}")
 
 eval "$("${PYTHON_BIN}" "${RESOLVER_ARGS[@]}")"
+resolve_gpu_mode
 
 if [[ "${PUSH}" -eq 1 && "${TEST_AFTER_BUILD}" -eq 1 ]]; then
     echo "test-after-build 需要本地已加载镜像，请不要和 --push 一起使用。" >&2
@@ -318,6 +380,10 @@ BUILD_ARGS=(
     --build-arg "CUSTOM_NODES_LOCK_B64=${CUSTOM_NODES_LOCK_B64}"
 )
 
+if needs_host_gateway_alias; then
+    BUILD_ARGS+=(--add-host "host.docker.internal=host-gateway")
+fi
+
 BUILD_ARGS+=(--cache-to "type=local,dest=${CACHE_NEW_DIR},mode=max")
 
 for cache_from_dir in "${CACHE_FROM_DIRS[@]:-}"; do
@@ -340,6 +406,8 @@ echo "[Build] IMAGE_TAG=${IMAGE_TAG}"
 echo "[Build] BUILD_STAGE=${BUILD_STAGE}"
 echo "[Build] VARIANT=${VARIANT}"
 echo "[Build] PYTORCH_INDEX_URL=${PYTORCH_INDEX_URL}"
+echo "[Build] COMFYUI_GPU_MODE=${COMFYUI_GPU_MODE}"
+echo "[Build] GPU_ENABLED=${GPU_ENABLED}"
 echo "[ComfyUI] RESOLVED_COMMIT=${COMFYUI_RESOLVED_COMMIT}"
 
 (
@@ -356,5 +424,5 @@ if [[ "${BUILD_STAGE}" == "final" ]]; then
 fi
 
 if [[ "${TEST_AFTER_BUILD}" -eq 1 ]]; then
-    bash "${TEST_SCRIPT}" --image-tag "${IMAGE_TAG}" --build-stage "${BUILD_STAGE}"
+    bash "${TEST_SCRIPT}" --image-tag "${IMAGE_TAG}" --build-stage "${BUILD_STAGE}" --gpu-enabled "${GPU_ENABLED}"
 fi

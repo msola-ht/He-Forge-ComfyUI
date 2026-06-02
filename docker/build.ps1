@@ -14,6 +14,9 @@ param(
     [ValidateSet('22.04', '24.04')]
     [string]$UbuntuVersion = '22.04',
 
+    [ValidateSet('auto', 'on', 'off')]
+    [string]$ComfyUiGpuMode = 'auto',
+
     [string]$MiniforgeInstallerUrl = 'https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh',
 
     [string]$PythonVersion = '3.12',
@@ -54,6 +57,49 @@ $envExampleFile = Join-Path $dockerDir '.env.example'
 $pluginManifestFile = Join-Path $dockerDir 'plugins/custom-nodes.json'
 $pluginLockResolver = Join-Path $scriptDir 'resolve-plugin-lock.py'
 
+function Test-DockerGpuRuntimeSupport {
+    $runtimeJson = & docker info --format '{{json .Runtimes}}' 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $runtimeJson) {
+        return $false
+    }
+
+    return $runtimeJson -match '"nvidia"'
+}
+
+function Resolve-GpuEnabled {
+    param(
+        [string]$Mode
+    )
+
+    $normalizedMode = if ([string]::IsNullOrWhiteSpace($Mode)) { 'auto' } else { $Mode.Trim().ToLowerInvariant() }
+    switch ($normalizedMode) {
+        'auto' { return (Test-DockerGpuRuntimeSupport) }
+        'on' { return $true }
+        'true' { return $true }
+        '1' { return $true }
+        'yes' { return $true }
+        'off' { return $false }
+        'false' { return $false }
+        '0' { return $false }
+        'no' { return $false }
+        default { throw "不支持的 COMFYUI_GPU_MODE：$Mode。可选值：auto、on、off。" }
+    }
+}
+
+function Test-UsesHostDockerInternal {
+    param(
+        [string[]]$Values
+    )
+
+    foreach ($value in $Values) {
+        if ($value -and $value.Contains('host.docker.internal')) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 . (Join-Path $scriptDir 'env.ps1')
 . (Join-Path $scriptDir 'versions.ps1')
 . (Join-Path $scriptDir 'prompt.ps1')
@@ -67,6 +113,7 @@ $defaults = @{
     CudaImageVersion = $CudaImageVersion
     PyTorchCudaProfile = $PyTorchCudaProfile
     UbuntuVersion = $UbuntuVersion
+    ComfyUiGpuMode = $ComfyUiGpuMode
     MiniforgeInstallerUrl = $MiniforgeInstallerUrl
     PythonVersion = $PythonVersion
     ComfyUIRepo = $ComfyUIRepo
@@ -87,6 +134,7 @@ $ImageName = $versionConfig.ImageName
 $CudaImageVersion = $versionConfig.CudaImageVersion
 $PyTorchCudaProfile = $versionConfig.PyTorchCudaProfile
 $UbuntuVersion = $versionConfig.UbuntuVersion
+$ComfyUiGpuMode = $versionConfig.ComfyUiGpuMode
 $MiniforgeInstallerUrl = $versionConfig.MiniforgeInstallerUrl
 $PythonVersion = $versionConfig.PythonVersion
 $ComfyUIRepo = $versionConfig.ComfyUIRepo
@@ -97,6 +145,7 @@ $PipIndexUrl = $versionConfig.PipIndexUrl
 $PipExtraIndexUrl = $versionConfig.PipExtraIndexUrl
 $PipTrustedHost = $versionConfig.PipTrustedHost
 $PyTorchIndexUrlOverride = $versionConfig.PyTorchIndexUrlOverride
+$gpuEnabled = Resolve-GpuEnabled -Mode $ComfyUiGpuMode
 
 if (-not $FromEnv) {
     Show-VersionConfig -Config $versionConfig
@@ -111,6 +160,7 @@ if (-not $FromEnv) {
             -CudaImageVersion $versionConfig.CudaImageVersion `
             -PyTorchCudaProfile $versionConfig.PyTorchCudaProfile `
             -UbuntuVersion $versionConfig.UbuntuVersion `
+            -ComfyUiGpuMode $versionConfig.ComfyUiGpuMode `
             -MiniforgeInstallerUrl $versionConfig.MiniforgeInstallerUrl `
             -PythonVersion $versionConfig.PythonVersion `
             -ComfyUIRepo $versionConfig.ComfyUIRepo `
@@ -129,6 +179,7 @@ if (-not $FromEnv) {
         $CudaImageVersion = $versionConfig.CudaImageVersion
         $PyTorchCudaProfile = $versionConfig.PyTorchCudaProfile
         $UbuntuVersion = $versionConfig.UbuntuVersion
+        $ComfyUiGpuMode = $versionConfig.ComfyUiGpuMode
         $MiniforgeInstallerUrl = $versionConfig.MiniforgeInstallerUrl
         $PythonVersion = $versionConfig.PythonVersion
         $ComfyUIRepo = $versionConfig.ComfyUIRepo
@@ -139,6 +190,7 @@ if (-not $FromEnv) {
         $PipExtraIndexUrl = $versionConfig.PipExtraIndexUrl
         $PipTrustedHost = $versionConfig.PipTrustedHost
         $PyTorchIndexUrlOverride = $versionConfig.PyTorchIndexUrlOverride
+        $gpuEnabled = Resolve-GpuEnabled -Mode $ComfyUiGpuMode
     }
 }
 
@@ -262,6 +314,10 @@ $arguments = @(
     '--build-arg', "CUSTOM_NODES_LOCK_B64=$customNodesLockB64"
 )
 
+if (Test-UsesHostDockerInternal -Values @($PipIndexUrl, $PipExtraIndexUrl, $PyTorchIndexUrlOverride)) {
+    $arguments += @('--add-host', 'host.docker.internal=host-gateway')
+}
+
 $arguments += @('--cache-to', "type=local,dest=$cacheNewDir,mode=max")
 
 $cacheFromDirs = @()
@@ -323,6 +379,8 @@ try {
         Write-Host "[PluginLock] hash=$customNodesHash"
         Write-Host "[ComfyUI] resolved_commit=$comfyUIResolvedCommit"
     }
+    Write-Host "[Build] COMFYUI_GPU_MODE=$ComfyUiGpuMode"
+    Write-Host "[Build] GPU_ENABLED=$gpuEnabled"
     if ($PipIndexUrl) {
         Write-Host "[BuildProxy] PIP_INDEX_URL=$PipIndexUrl"
     }
@@ -371,7 +429,7 @@ try {
     }
 
     if ($TestAfterBuild) {
-        Invoke-ImageSmokeTest -ImageTag $tag -BuildStage $BuildStage
+        Invoke-ImageSmokeTest -ImageTag $tag -BuildStage $BuildStage -GpuEnabled:$gpuEnabled
     }
 }
 finally {

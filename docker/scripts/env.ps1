@@ -108,6 +108,7 @@ function Save-VersionConfig {
         [string]$CudaImageVersion,
         [string]$PyTorchCudaProfile,
         [string]$UbuntuVersion,
+        [string]$ComfyUiGpuMode,
         [string]$MiniforgeInstallerUrl,
         [string]$PythonVersion,
         [string]$ComfyUIRepo,
@@ -124,6 +125,7 @@ function Save-VersionConfig {
     Set-EnvValue -Path $Path -Name 'CUDA_IMAGE_VERSION' -Value $CudaImageVersion
     Set-EnvValue -Path $Path -Name 'PYTORCH_CUDA_PROFILE' -Value $PyTorchCudaProfile
     Set-EnvValue -Path $Path -Name 'UBUNTU_VERSION' -Value $UbuntuVersion
+    Set-EnvValue -Path $Path -Name 'COMFYUI_GPU_MODE' -Value $ComfyUiGpuMode
     Set-EnvValue -Path $Path -Name 'MINIFORGE_INSTALLER_URL' -Value $MiniforgeInstallerUrl
     Set-EnvValue -Path $Path -Name 'PYTHON_VERSION' -Value $PythonVersion
     Set-EnvValue -Path $Path -Name 'COMFYUI_REPO' -Value $ComfyUIRepo
@@ -146,16 +148,17 @@ function Get-VersionConfig {
         [hashtable]$Defaults
     )
 
-    return @{
-        ImageName = Use-EnvValue -Values $Values -Name 'IMAGE_NAME' -CurrentValue $Defaults.ImageName
-        CudaImageVersion = Use-EnvValue -Values $Values -Name 'CUDA_IMAGE_VERSION' -CurrentValue $Defaults.CudaImageVersion
-        PyTorchCudaProfile = Use-EnvValue -Values $Values -Name 'PYTORCH_CUDA_PROFILE' -CurrentValue (Use-EnvValue -Values $Values -Name 'CUDA_PROFILE' -CurrentValue $Defaults.PyTorchCudaProfile)
-        UbuntuVersion = Use-EnvValue -Values $Values -Name 'UBUNTU_VERSION' -CurrentValue $Defaults.UbuntuVersion
-        MiniforgeInstallerUrl = Use-EnvValue -Values $Values -Name 'MINIFORGE_INSTALLER_URL' -CurrentValue $Defaults.MiniforgeInstallerUrl
-        PythonVersion = Use-EnvValue -Values $Values -Name 'PYTHON_VERSION' -CurrentValue $Defaults.PythonVersion
-        ComfyUIRepo = Use-EnvValue -Values $Values -Name 'COMFYUI_REPO' -CurrentValue $Defaults.ComfyUIRepo
-        ComfyUIRef = Use-EnvValue -Values $Values -Name 'COMFYUI_REF' -CurrentValue $Defaults.ComfyUIRef
-        NodeJsVersion = Use-EnvValue -Values $Values -Name 'NODEJS_VERSION' -CurrentValue $Defaults.NodeJsVersion
+        return @{
+            ImageName = Use-EnvValue -Values $Values -Name 'IMAGE_NAME' -CurrentValue $Defaults.ImageName
+            CudaImageVersion = Use-EnvValue -Values $Values -Name 'CUDA_IMAGE_VERSION' -CurrentValue $Defaults.CudaImageVersion
+            PyTorchCudaProfile = Use-EnvValue -Values $Values -Name 'PYTORCH_CUDA_PROFILE' -CurrentValue (Use-EnvValue -Values $Values -Name 'CUDA_PROFILE' -CurrentValue $Defaults.PyTorchCudaProfile)
+            UbuntuVersion = Use-EnvValue -Values $Values -Name 'UBUNTU_VERSION' -CurrentValue $Defaults.UbuntuVersion
+            ComfyUiGpuMode = Use-EnvValue -Values $Values -Name 'COMFYUI_GPU_MODE' -CurrentValue $Defaults.ComfyUiGpuMode
+            MiniforgeInstallerUrl = Use-EnvValue -Values $Values -Name 'MINIFORGE_INSTALLER_URL' -CurrentValue $Defaults.MiniforgeInstallerUrl
+            PythonVersion = Use-EnvValue -Values $Values -Name 'PYTHON_VERSION' -CurrentValue $Defaults.PythonVersion
+            ComfyUIRepo = Use-EnvValue -Values $Values -Name 'COMFYUI_REPO' -CurrentValue $Defaults.ComfyUIRepo
+            ComfyUIRef = Use-EnvValue -Values $Values -Name 'COMFYUI_REF' -CurrentValue $Defaults.ComfyUIRef
+            NodeJsVersion = Use-EnvValue -Values $Values -Name 'NODEJS_VERSION' -CurrentValue $Defaults.NodeJsVersion
         TorchVersion = Use-EnvValue -Values $Values -Name 'TORCH_VERSION' -CurrentValue $Defaults.TorchVersion
         PipIndexUrl = Use-EnvValue -Values $Values -Name 'PIP_INDEX_URL' -CurrentValue $Defaults.PipIndexUrl
         PipExtraIndexUrl = Use-EnvValue -Values $Values -Name 'PIP_EXTRA_INDEX_URL' -CurrentValue $Defaults.PipExtraIndexUrl
@@ -175,6 +178,7 @@ function Merge-BoundVersionConfig {
         CudaImageVersion = 'CudaImageVersion'
         PyTorchCudaProfile = 'PyTorchCudaProfile'
         UbuntuVersion = 'UbuntuVersion'
+        ComfyUiGpuMode = 'ComfyUiGpuMode'
         MiniforgeInstallerUrl = 'MiniforgeInstallerUrl'
         PythonVersion = 'PythonVersion'
         ComfyUIRepo = 'ComfyUIRepo'

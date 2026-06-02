@@ -27,7 +27,8 @@ function Invoke-ImageSmokeTest {
     param(
         [string]$ImageTag,
         [ValidateSet('bootstrap', 'final')]
-        [string]$BuildStage
+        [string]$BuildStage,
+        [bool]$GpuEnabled = $true
     )
 
     Write-Host ""
@@ -44,11 +45,16 @@ function Invoke-ImageSmokeTest {
     )
 
     if ($BuildStage -eq 'final') {
-        Invoke-DockerTestCommand -Name 'PyTorch CUDA 可用性' -ImageTag $ImageTag -Gpu -Command @(
-            'python',
-            '-c',
-            'import torch, torchvision, torchaudio; print("torch=" + torch.__version__); print("torchvision=" + torchvision.__version__); print("torchaudio=" + torchaudio.__version__); import xformers; print("xformers=" + xformers.__version__); print("cuda_available=" + str(torch.cuda.is_available())); assert torch.cuda.is_available(), "CUDA is not available"; print("gpu=" + torch.cuda.get_device_name(0))'
-        )
+        if ($GpuEnabled) {
+            Invoke-DockerTestCommand -Name 'PyTorch CUDA 可用性' -ImageTag $ImageTag -Gpu -Command @(
+                'python',
+                '-c',
+                'import torch, torchvision, torchaudio; print("torch=" + torch.__version__); print("torchvision=" + torchvision.__version__); print("torchaudio=" + torchaudio.__version__); import xformers; print("xformers=" + xformers.__version__); print("cuda_available=" + str(torch.cuda.is_available())); assert torch.cuda.is_available(), "CUDA is not available"; print("gpu=" + torch.cuda.get_device_name(0))'
+            )
+        } else {
+            Write-Host ""
+            Write-Host "[Test] 跳过 PyTorch CUDA 可用性：当前 GPU 模式未启用"
+        }
         Invoke-DockerTestCommand -Name 'ComfyUI Python 导入' -ImageTag $ImageTag -Command @(
             'python',
             '-c',
