@@ -116,6 +116,93 @@ function Remove-StaleBuildKitNewDirs {
     }
 }
 
+function Acquire-BuildKitCacheLock {
+    param(
+        [string]$LockPath,
+        [timespan]$Timeout = ([TimeSpan]::FromMinutes(10)),
+        [timespan]$PollInterval = ([TimeSpan]::FromSeconds(1))
+    )
+
+    $deadlineUtc = [DateTime]::UtcNow.Add($Timeout)
+    while ($true) {
+        try {
+            New-Item -ItemType Directory -Path $LockPath -ErrorAction Stop | Out-Null
+            return
+        }
+        catch {
+            if (Test-Path $LockPath) {
+                $lockItem = Get-Item -LiteralPath $LockPath -ErrorAction SilentlyContinue
+                if ($lockItem -and $lockItem.LastWriteTimeUtc -le [DateTime]::UtcNow.Subtract($Timeout)) {
+                    Write-Host "[CacheRotate] remove stale lock docker/$([System.IO.Path]::GetFileName($LockPath))"
+                    Remove-Item -LiteralPath $LockPath -Force -ErrorAction SilentlyContinue
+                    continue
+                }
+            }
+
+            if ([DateTime]::UtcNow -ge $deadlineUtc) {
+                throw "获取缓存轮换锁超时：$LockPath"
+            }
+
+            Start-Sleep -Milliseconds ([Math]::Max(1, [int][Math]::Ceiling($PollInterval.TotalMilliseconds)))
+        }
+    }
+}
+
+function Release-BuildKitCacheLock {
+    param(
+        [string]$LockPath
+    )
+
+    if (-not (Test-Path $LockPath)) {
+        return
+    }
+
+    Remove-Item -LiteralPath $LockPath -Force
+}
+
+function Promote-BuildKitCacheDirectory {
+    param(
+        [string]$CurrentPath,
+        [string]$IncomingPath,
+        [string]$BaseDir = ''
+    )
+
+    if (-not (Test-BuildKitLocalCache -Path $IncomingPath)) {
+        throw "新的 BuildKit 缓存目录不可用，保留现有缓存：$IncomingPath"
+    }
+
+    $backupPath = "${CurrentPath}-previous"
+    $currentLeafName = Split-Path -Leaf $CurrentPath
+    $backupLeafName = Split-Path -Leaf $backupPath
+    $incomingLeafName = Split-Path -Leaf $IncomingPath
+
+    if ((Test-Path $CurrentPath) -and (Test-Path $backupPath)) {
+        Remove-BuildKitCacheDirectory -Path $backupPath -Reason 'stale-rotate-backup' -BaseDir $BaseDir
+    }
+
+    if (Test-Path $CurrentPath) {
+        Write-Host "[CacheRotate] backup docker/$currentLeafName -> docker/$backupLeafName"
+        Rename-Item -LiteralPath $CurrentPath -NewName $backupLeafName
+    }
+
+    try {
+        Write-Host "[CacheRotate] promote docker/$incomingLeafName -> docker/$currentLeafName"
+        Rename-Item -LiteralPath $IncomingPath -NewName $currentLeafName
+    }
+    catch {
+        if ((Test-Path $backupPath) -and -not (Test-Path $CurrentPath)) {
+            Write-Host "[CacheRotate] restore backup docker/$backupLeafName -> docker/$currentLeafName"
+            Rename-Item -LiteralPath $backupPath -NewName $currentLeafName
+        }
+
+        throw
+    }
+
+    if (Test-Path $backupPath) {
+        Remove-BuildKitCacheDirectory -Path $backupPath -Reason 'rotated-old-cache' -BaseDir $BaseDir
+    }
+}
+
 function Remove-BuildKitSiblingCaches {
     param(
         [string]$ParentDir,
@@ -131,7 +218,8 @@ function Remove-BuildKitSiblingCaches {
     $currentFullPath = [System.IO.Path]::GetFullPath($CurrentDir)
     $siblingDirs = Get-ChildItem -LiteralPath $ParentDir -Directory -ErrorAction SilentlyContinue | Where-Object {
         [System.IO.Path]::GetFullPath($_.FullName) -cne $currentFullPath -and
-        $_.Name -notlike '*-new'
+        $_.Name -notlike '*-new' -and
+        $_.Name -notlike '*-previous'
     }
 
     foreach ($siblingDir in $siblingDirs) {

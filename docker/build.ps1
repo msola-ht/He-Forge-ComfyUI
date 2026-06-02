@@ -275,6 +275,7 @@ $finalCacheDir = Join-Path $cacheRootDir "final/$finalCacheKeySuffix"
 $finalCacheNewDir = Join-Path $cacheRootDir "final/$finalCacheKeySuffix-new"
 $cacheDir = if ($BuildStage -eq 'bootstrap') { $bootstrapCacheDir } else { $finalCacheDir }
 $cacheNewDir = if ($BuildStage -eq 'bootstrap') { $bootstrapCacheNewDir } else { $finalCacheNewDir }
+$cacheRotateLockDir = if ($BuildStage -eq 'bootstrap') { Join-Path $bootstrapCacheParentDir '.rotate.lock' } else { Join-Path $finalCacheParentDir '.rotate.lock' }
 
 if (Test-Path $cacheNewDir) {
     Remove-Item $cacheNewDir -Recurse -Force
@@ -369,6 +370,8 @@ $arguments += '.'
 
 Push-Location $root
 
+$buildCompleted = $false
+
 try {
     Show-CacheState -Label 'BeforeBuild' -CacheDir $cacheDir -CacheNewDir $cacheNewDir -BaseDir $dockerDir
     Show-CacheState -Label 'LegacyCache' -CacheDir $legacyCacheDir -CacheNewDir $legacyCacheNewDir -BaseDir $dockerDir
@@ -404,22 +407,22 @@ try {
         throw "docker buildx build 失败，退出码：$LASTEXITCODE"
     }
 
-    if (Test-Path $cacheDir) {
-        Remove-Item $cacheDir -Recurse -Force
-    }
+    Acquire-BuildKitCacheLock -LockPath $cacheRotateLockDir
+    try {
+        Promote-BuildKitCacheDirectory -CurrentPath $cacheDir -IncomingPath $cacheNewDir -BaseDir $dockerDir
 
-    if (Test-Path $cacheNewDir) {
-        Rename-Item -LiteralPath $cacheNewDir -NewName (Split-Path -Leaf $cacheDir)
+        Remove-StaleBuildKitNewDirs -ParentDir $bootstrapCacheParentDir -ExcludePath $bootstrapCacheNewDir -BaseDir $dockerDir
+        Remove-StaleBuildKitNewDirs -ParentDir $finalCacheParentDir -ExcludePath $finalCacheNewDir -BaseDir $dockerDir
+        if ($BuildStage -eq 'final') {
+            Remove-BuildKitSiblingCaches `
+                -ParentDir $finalCacheParentDir `
+                -CurrentDir $cacheDir `
+                -Patterns @("$cacheKeySuffix*") `
+                -BaseDir $dockerDir
+        }
     }
-
-    Remove-StaleBuildKitNewDirs -ParentDir $bootstrapCacheParentDir -ExcludePath $bootstrapCacheNewDir -BaseDir $dockerDir
-    Remove-StaleBuildKitNewDirs -ParentDir $finalCacheParentDir -ExcludePath $finalCacheNewDir -BaseDir $dockerDir
-    if ($BuildStage -eq 'final') {
-        Remove-BuildKitSiblingCaches `
-            -ParentDir $finalCacheParentDir `
-            -CurrentDir $cacheDir `
-            -Patterns @("$cacheKeySuffix*") `
-            -BaseDir $dockerDir
+    finally {
+        Release-BuildKitCacheLock -LockPath $cacheRotateLockDir
     }
 
     Show-CacheState -Label 'AfterBuild' -CacheDir $cacheDir -CacheNewDir $cacheNewDir -BaseDir $dockerDir
@@ -431,9 +434,11 @@ try {
     if ($TestAfterBuild) {
         Invoke-ImageSmokeTest -ImageTag $tag -BuildStage $BuildStage -GpuEnabled:$gpuEnabled
     }
+
+    $buildCompleted = $true
 }
 finally {
-    if ($LASTEXITCODE -ne 0) {
+    if (-not $buildCompleted) {
         Show-CacheState -Label 'OnFailure' -CacheDir $cacheDir -CacheNewDir $cacheNewDir -BaseDir $dockerDir
         if (Test-Path $cacheNewDir) {
             $cacheNewName = Split-Path -Leaf $cacheNewDir

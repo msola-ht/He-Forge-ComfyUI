@@ -172,6 +172,7 @@ remove_sibling_caches() {
         [[ -d "${dir}" ]] || continue
         [[ "${dir}" == "${current_dir}" ]] && continue
         [[ "${dir}" == *-new ]] && continue
+        [[ "${dir}" == *-previous ]] && continue
 
         matched=0
         for pattern in "${patterns[@]}"; do
@@ -186,6 +187,49 @@ remove_sibling_caches() {
         fi
     done
     shopt -u nullglob
+}
+
+acquire_buildkit_cache_lock() {
+    local lock_dir="$1"
+    local timeout_seconds="${2:-600}"
+    local start_time
+    local now
+    local last_modified
+    local lock_age
+
+    start_time="$(date +%s)"
+    while ! mkdir "${lock_dir}" 2>/dev/null; do
+        now="$(date +%s)"
+        if [[ -d "${lock_dir}" ]]; then
+            if last_modified="$(stat -f '%m' "${lock_dir}" 2>/dev/null)"; then
+                :
+            elif last_modified="$(stat -c '%Y' "${lock_dir}" 2>/dev/null)"; then
+                :
+            else
+                last_modified=0
+            fi
+
+            lock_age=$((now - last_modified))
+            if (( last_modified > 0 && lock_age >= timeout_seconds )); then
+                echo "[BuildCache] remove stale rotate lock ${lock_dir}" >&2
+                rmdir "${lock_dir}" 2>/dev/null || true
+                continue
+            fi
+        fi
+
+        if (( now - start_time >= timeout_seconds )); then
+            echo "[BuildCache] 获取缓存轮换锁超时：${lock_dir}" >&2
+            return 1
+        fi
+        sleep 1
+    done
+}
+
+release_buildkit_cache_lock() {
+    local lock_dir="$1"
+
+    [[ -d "${lock_dir}" ]] || return 0
+    rmdir "${lock_dir}"
 }
 
 remove_stale_new_dirs() {
@@ -220,6 +264,42 @@ remove_stale_new_dirs() {
         rm -rf "${dir}"
     done
     shopt -u nullglob
+}
+
+promote_buildkit_cache() {
+    local current_dir="$1"
+    local new_dir="$2"
+    local backup_dir="${current_dir}-previous"
+
+    if [[ ! -d "${new_dir}" ]] || ! has_buildkit_cache "${new_dir}"; then
+        echo "[BuildCache] 新缓存目录不可用，保留现有缓存：${new_dir}" >&2
+        return 1
+    fi
+
+    if [[ -e "${current_dir}" && -e "${backup_dir}" ]]; then
+        echo "[BuildCache] remove stale backup ${backup_dir}"
+        rm -rf "${backup_dir}"
+    fi
+
+    if [[ -e "${current_dir}" ]]; then
+        echo "[BuildCache] backup current cache ${current_dir} -> ${backup_dir}"
+        mv "${current_dir}" "${backup_dir}"
+    fi
+
+    if mv "${new_dir}" "${current_dir}"; then
+        if [[ -e "${backup_dir}" ]]; then
+            echo "[BuildCache] remove old cache backup ${backup_dir}"
+            rm -rf "${backup_dir}"
+        fi
+        return 0
+    fi
+
+    if [[ -e "${backup_dir}" && ! -e "${current_dir}" ]]; then
+        echo "[BuildCache] restore cache backup ${backup_dir} -> ${current_dir}" >&2
+        mv "${backup_dir}" "${current_dir}"
+    fi
+
+    return 1
 }
 
 while [[ $# -gt 0 ]]; do
@@ -402,6 +482,12 @@ fi
 
 BUILD_ARGS+=(.)
 
+if [[ "${BUILD_STAGE}" == "bootstrap" ]]; then
+    CACHE_ROTATE_LOCK_DIR="${BOOTSTRAP_CACHE_PARENT_DIR}/.rotate.lock"
+else
+    CACHE_ROTATE_LOCK_DIR="${FINAL_CACHE_PARENT_DIR}/.rotate.lock"
+fi
+
 echo "[Build] IMAGE_TAG=${IMAGE_TAG}"
 echo "[Build] BUILD_STAGE=${BUILD_STAGE}"
 echo "[Build] VARIANT=${VARIANT}"
@@ -415,13 +501,16 @@ echo "[ComfyUI] RESOLVED_COMMIT=${COMFYUI_RESOLVED_COMMIT}"
     docker "${BUILD_ARGS[@]}"
 )
 
-rm -rf "${CACHE_DIR}"
-if [[ -d "${CACHE_NEW_DIR}" ]]; then
-    mv "${CACHE_NEW_DIR}" "${CACHE_DIR}"
-fi
-if [[ "${BUILD_STAGE}" == "final" ]]; then
-    remove_sibling_caches "${FINAL_CACHE_PARENT_DIR}" "${CACHE_DIR}" "${CACHE_KEY_SUFFIX}"*
-fi
+(
+    set -e
+    acquire_buildkit_cache_lock "${CACHE_ROTATE_LOCK_DIR}"
+    trap 'release_buildkit_cache_lock "${CACHE_ROTATE_LOCK_DIR}"' EXIT
+
+    promote_buildkit_cache "${CACHE_DIR}" "${CACHE_NEW_DIR}"
+    if [[ "${BUILD_STAGE}" == "final" ]]; then
+        remove_sibling_caches "${FINAL_CACHE_PARENT_DIR}" "${CACHE_DIR}" "${CACHE_KEY_SUFFIX}"*
+    fi
+)
 
 if [[ "${TEST_AFTER_BUILD}" -eq 1 ]]; then
     bash "${TEST_SCRIPT}" --image-tag "${IMAGE_TAG}" --build-stage "${BUILD_STAGE}" --gpu-enabled "${GPU_ENABLED}"
